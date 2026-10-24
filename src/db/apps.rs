@@ -156,6 +156,24 @@ pub async fn credential_by_client_id(
     .await
 }
 
+/// Catat bahwa kredensial baru saja dipakai menerbitkan token.
+///
+/// Kegagalan di sini tidak boleh menggagalkan permintaan token, jadi pemanggil
+/// yang memutuskan mau mengabaikan error-nya atau tidak.
+pub async fn touch_credential(pool: &PgPool, credential_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        UPDATE app_credentials
+        SET last_used_at = now()
+        WHERE id = $1
+        "#,
+        credential_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Cabut semua kredensial app yang masih hidup (rotate secret memakai ini).
 pub async fn revoke_credentials(pool: &PgPool, app_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query!(

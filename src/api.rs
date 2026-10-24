@@ -2,6 +2,7 @@ pub mod auth;
 pub mod health;
 pub mod jwks;
 pub mod me;
+pub mod token;
 
 use axum::Router;
 
@@ -16,4 +17,5 @@ pub fn router() -> Router<AppState> {
         .merge(jwks::router())
         .merge(auth::router())
         .merge(me::router())
+        .merge(token::router())
 }

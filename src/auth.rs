@@ -7,6 +7,7 @@ pub mod extractor;
 pub mod jwt;
 pub mod keys;
 pub mod password;
+pub mod secret;
 
 pub use jwt::{Claims, JwtError, sign_access, verify_access};
 pub use keys::{KeyError, SigningKey};

@@ -27,6 +27,13 @@ pub const PEPPER_LEN: usize = 32;
 /// secara tidak langsung karena `ARGON2_PEPPER` kosong = error.
 const DEV_PEPPER: &[u8] = b"sanca-dev-pepper-0123456789abcde";
 
+/// Pepper kedua, khusus untuk hash secret client (`CLIENT_SECRET_PEPPER`).
+///
+/// Dipisah dari `DEV_PEPPER` supaya rotasi salah satu tidak memaksa rotasi yang
+/// lain. Sama seperti pepper password, nilai ini hanya untuk development dan
+/// wajib diisi sendiri saat `SANCA_ENV=prod`.
+const DEV_CLIENT_PEPPER: &[u8] = b"sanca-dev-client-pepper-01234567";
+
 /// Lingkungan tempat aplikasi berjalan, memengaruhi perilaku saat runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Environment {
@@ -59,6 +66,8 @@ pub struct Config {
     pub sanca_key_dir: Option<PathBuf>,
     pub argon2_pepper: SecretString,
     pub argon2_pepper_version: i16,
+    /// Pepper untuk hash secret client machine-to-machine.
+    pub client_secret_pepper: SecretString,
     pub log_dir: PathBuf,
 }
 
@@ -125,6 +134,20 @@ impl Config {
             }
         };
 
+        let client_secret_pepper = match non_empty("CLIENT_SECRET_PEPPER") {
+            Some(value) => value,
+            None if prod => {
+                return Err("CLIENT_SECRET_PEPPER wajib diisi saat SANCA_ENV=prod".into());
+            }
+            None => {
+                eprintln!(
+                    "peringatan: CLIENT_SECRET_PEPPER kosong, memakai pepper development. \
+                     Jangan dipakai di produksi."
+                );
+                STANDARD.encode(DEV_CLIENT_PEPPER)
+            }
+        };
+
         // Pepper harus base64 dari tepat 32 byte; salah bentuk = gagal sekarang,
         // bukan nanti saat user pertama mencoba login.
         let decoded = STANDARD
@@ -134,6 +157,16 @@ impl Config {
             return Err(format!(
                 "ARGON2_PEPPER harus {PEPPER_LEN} byte setelah di-decode, dapat {}",
                 decoded.len()
+            ));
+        }
+
+        let decoded_client = STANDARD
+            .decode(client_secret_pepper.as_bytes())
+            .map_err(|_| "CLIENT_SECRET_PEPPER bukan base64 yang valid".to_string())?;
+        if decoded_client.len() != PEPPER_LEN {
+            return Err(format!(
+                "CLIENT_SECRET_PEPPER harus {PEPPER_LEN} byte setelah di-decode, dapat {}",
+                decoded_client.len()
             ));
         }
 
@@ -148,6 +181,7 @@ impl Config {
             sanca_key_dir,
             argon2_pepper: SecretString::from(argon2_pepper),
             argon2_pepper_version,
+            client_secret_pepper: SecretString::from(client_secret_pepper),
             log_dir,
         })
     }

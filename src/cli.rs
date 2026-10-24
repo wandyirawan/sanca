@@ -1,10 +1,13 @@
 use std::io::{IsTerminal, Read};
 
 use anyhow::{Context, bail};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use rand::TryRngCore;
 
 use crate::auth::password::hash_password;
+use crate::auth::secret::{generate_client_secret, hash_client_secret};
 use crate::config::Config;
+use crate::db::apps::{self, AppKind};
 use crate::db::{rbac, users};
 
 /// Sanca — IAM service ringan berbasis Rust + PostgreSQL.
@@ -23,6 +26,11 @@ pub enum Command {
     User {
         #[command(subcommand)]
         command: UserCommand,
+    },
+    /// Operasi administratif pada tabel apps dan kredensialnya.
+    App {
+        #[command(subcommand)]
+        command: AppCommand,
     },
 }
 
@@ -43,6 +51,48 @@ pub enum UserCommand {
         #[arg(long)]
         superadmin: bool,
     },
+}
+
+/// Subcommand registry app.
+#[derive(Subcommand, Debug)]
+pub enum AppCommand {
+    /// Daftarkan app baru sekaligus kredensial client pertamanya.
+    Create {
+        /// Slug app; dipakai sebagai klaim `aud` di setiap token.
+        #[arg(long)]
+        slug: String,
+        /// Nama tampilan app.
+        #[arg(long)]
+        name: String,
+        /// Jenis app, menentukan cara klien memakai token.
+        #[arg(long, value_enum)]
+        kind: AppKindArg,
+    },
+    /// Cabut kredensial lama app dan terbitkan pasangan client baru.
+    RotateSecret {
+        /// Slug app yang kredensialnya dirotasi.
+        slug: String,
+    },
+}
+
+/// Pembungkus `AppKind` supaya clap bisa memvalidasi nilainya.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum AppKindArg {
+    Web,
+    Spa,
+    Service,
+    Cli,
+}
+
+impl From<AppKindArg> for AppKind {
+    fn from(value: AppKindArg) -> Self {
+        match value {
+            AppKindArg::Web => AppKind::Web,
+            AppKindArg::Spa => AppKind::Spa,
+            AppKindArg::Service => AppKind::Service,
+            AppKindArg::Cli => AppKind::Cli,
+        }
+    }
 }
 
 impl Cli {
@@ -119,6 +169,112 @@ pub async fn run_user_command(command: &UserCommand) -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// Jalankan subcommand registry app.
+///
+/// Secret client hanya dicetak sekali, saat dibuat. Sesudah itu yang tersimpan
+/// di database cuma hash-nya, jadi secret asli memang tidak bisa ditampilkan
+/// ulang — pemanggil harus menyimpannya saat itu juga.
+pub async fn run_app_command(command: &AppCommand) -> anyhow::Result<()> {
+    let config = Config::from_env().map_err(anyhow::Error::msg)?;
+    let pool = connect().await?;
+
+    match command {
+        AppCommand::Create { slug, name, kind } => {
+            if apps::by_slug(&pool, slug)
+                .await
+                .context("gagal memeriksa slug yang sudah ada")?
+                .is_some()
+            {
+                bail!("app dengan slug {slug} sudah terdaftar; pakai slug lain");
+            }
+
+            let app = apps::insert(&pool, slug, name, AppKind::from(*kind))
+                .await
+                .context("gagal menyimpan app")?;
+
+            let (client_id, secret) = store_credential(&pool, &config, app.id, slug).await?;
+
+            println!("app dibuat: {} ({}) id {}", app.slug, name, app.id);
+            print_credential(&client_id, &secret);
+            Ok(())
+        }
+        AppCommand::RotateSecret { slug } => {
+            let Some(app) = apps::by_slug(&pool, slug)
+                .await
+                .context("gagal mencari app")?
+            else {
+                bail!("app dengan slug {slug} tidak ditemukan");
+            };
+
+            // Urutan penting: cabut dulu, baru terbitkan. Kalau penerbitan gagal,
+            // app berhenti bisa memakai token alih-alih punya dua secret hidup.
+            apps::revoke_credentials(&pool, app.id)
+                .await
+                .context("gagal mencabut kredensial lama")?;
+
+            let (client_id, secret) = store_credential(&pool, &config, app.id, slug).await?;
+
+            println!("secret dirotasi untuk app: {}", app.slug);
+            print_credential(&client_id, &secret);
+            Ok(())
+        }
+    }
+}
+
+/// Buat pasangan client_id + secret baru lalu simpan hash-nya.
+///
+/// Secret asli dikembalikan ke pemanggil untuk dicetak; tidak pernah masuk log.
+async fn store_credential(
+    pool: &sqlx::PgPool,
+    config: &Config,
+    app_id: uuid::Uuid,
+    slug: &str,
+) -> anyhow::Result<(String, String)> {
+    let client_id = new_client_id(slug);
+    let secret = generate_client_secret();
+
+    let hash = hash_client_secret(&secret, &config.client_secret_pepper)
+        .context("secret client ditolak saat hashing")?;
+
+    apps::create_credential(pool, app_id, &client_id, &hash)
+        .await
+        .context("gagal menyimpan kredensial client")?;
+
+    Ok((client_id, secret))
+}
+
+/// client_id tidak rahasia, jadi cukup mudah dibaca: slug plus 12 karakter acak
+/// hex supaya dua app dengan slug mirip tidak pernah bertabrakan.
+fn new_client_id(slug: &str) -> String {
+    let mut bytes = [0u8; 6];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("RNG sistem harus selalu tersedia");
+
+    let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("{slug}-{suffix}")
+}
+
+/// Cetak kredensial sekali, dengan peringatan bahwa secret tidak bisa dilihat lagi.
+fn print_credential(client_id: &str, secret: &str) {
+    println!("client_id: {client_id}");
+    println!("client_secret: {secret}");
+    println!(
+        "PERINGATAN: simpan client_secret sekarang. Yang tersimpan di database hanya \
+         hash-nya, jadi secret ini tidak bisa ditampilkan lagi."
+    );
+}
+
+/// Pool database untuk subcommand administratif.
+async fn connect() -> anyhow::Result<sqlx::PgPool> {
+    let database_url =
+        std::env::var("DATABASE_URL").context("DATABASE_URL wajib diisi untuk operasi database")?;
+
+    sqlx::PgPool::connect(&database_url)
+        .await
+        .context("gagal terhubung ke database")
 }
 
 /// Baca password dari stdin, buang newline penutup.

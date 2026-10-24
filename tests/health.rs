@@ -25,6 +25,10 @@ fn test_state(pool: PgPool) -> AppState {
         sanca_key_dir: None,
         argon2_pepper: SecretString::from(STANDARD.encode([7u8; 32])),
         argon2_pepper_version: 1,
+        client_secret_pepper: SecretString::from(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            [9u8; 32],
+        )),
         log_dir: std::env::temp_dir(),
     };
     let signing = SigningKey::load_or_generate(&config).expect("gagal membuat signing key test");

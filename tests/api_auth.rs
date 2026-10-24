@@ -49,6 +49,10 @@ fn test_config() -> Config {
         sanca_key_dir: None,
         argon2_pepper: SecretString::from(pepper()),
         argon2_pepper_version: 1,
+        client_secret_pepper: SecretString::from(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            [9u8; 32],
+        )),
         log_dir: std::env::temp_dir(),
     }
 }

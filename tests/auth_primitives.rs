@@ -32,6 +32,10 @@ fn config_with(key_dir: Option<PathBuf>) -> Config {
         sanca_key_dir: key_dir,
         argon2_pepper: SecretString::from(test_pepper()),
         argon2_pepper_version: 1,
+        client_secret_pepper: SecretString::from(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            [9u8; 32],
+        )),
         log_dir: std::env::temp_dir(),
     }
 }
