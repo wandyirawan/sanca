@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use axum::Router;
-use tower_http::request_id::{MakeRequestUuid, SetRequestIdLayer};
+use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::api;
@@ -13,13 +13,17 @@ use crate::config::Config;
 ///
 /// Dipakai oleh `main` dan oleh test integrasi supaya wiring tidak diduplikasi.
 pub fn build_app() -> Router {
+    // Urutan layer: yang ditambahkan paling akhir = paling luar. Jadi SetRequestId
+    // jalan lebih dulu (membuat id dan menaruhnya di header request), baru TraceLayer
+    // membuat span yang sudah memuat id itu, lalu PropagateRequestId menyalinnya ke
+    // respons. Tanpa Propagate, header tidak pernah terkirim balik ke klien.
+    let request_id = axum::http::HeaderName::from_static("x-request-id");
+
     Router::new()
         .merge(api::router())
-        .layer(SetRequestIdLayer::new(
-            axum::http::HeaderName::from_static("x-request-id"),
-            MakeRequestUuid,
-        ))
         .layer(TraceLayer::new_for_http())
+        .layer(PropagateRequestIdLayer::new(request_id.clone()))
+        .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))
 }
 
 /// Titik masuk aplikasi: baca config, jalankan healthcheck atau serve.
