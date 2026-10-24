@@ -993,7 +993,8 @@ Sisanya di atas (item 1) masih benar-benar terbuka: itu keputusan produk, bukan 
 Aturan operasional, bukan saran:
 
 1. **Setiap phase (atau subtask yang lolos verifikasi) langsung di-commit dan di-push.**
-   Pekerjaan yang belum ada di `origin/master` dianggap belum selesai. Jangan menumpuk
+   Cabang utama repo ini `main`. Pekerjaan yang belum ada di `origin/main` dianggap belum
+   selesai. Jangan menumpuk
    beberapa phase dalam satu commit besar, dan jangan menunggu "nanti kalau sudah rapi".
 2. **Format pesan = Conventional Commits.**
    ```
@@ -1016,4 +1017,4 @@ Aturan operasional, bukan saran:
 7. **Jangan pernah** commit berisi `.env`, private key, `target/`, atau perubahan yang
    membuat `cargo test`/`clippy` merah.
 8. Riwayat lama tidak ditulis ulang. Konvensi berlaku untuk commit baru; repo publik, jadi
-   `git push --force` ke `master` dilarang.
+   `git push --force` ke `main` dilarang.
