@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT p.key\n        FROM user_roles ur\n        JOIN roles r            ON r.id = ur.role_id\n        JOIN role_permissions rp ON rp.role_id = r.id\n        JOIN permissions p      ON p.id = rp.permission_id\n        WHERE ur.user_id = $1\n          AND r.app_id = $2\n          AND p.app_id = $2\n        ORDER BY 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permissions",
+            "name": "key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "afbc69116ffeb16f2c12464b97b60530e9a3ba97729f880fa00892cc3ea3adb6"
+}

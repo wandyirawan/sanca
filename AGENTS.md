@@ -937,10 +937,39 @@ cargo test` → `cargo deny check` → `docker build`.
 
 1. **Sanca menggantikan Mangosteen atau paralel?** Kalau paralel dan Granate/Salak/Kelapa
    sudah jalan, klaim JWT harus kompatibel (`sub`, `role`, `exp`). Sebutkan klaim wajib sama.
-2. **`citext` vs `text` + unique index `lower(email)`** — citext butuh extension; kalau
-   target DB managed tidak mengizinkan, pakai yang kedua. Putuskan sebelum migrasi 0001.
-3. **Instant revocation** — sudah disiapkan (`users.token_version` + cek di endpoint
-   sensitif). Perlu cek di setiap request (butuh Redis/cache) atau cukup jalur sensitif?
-4. **Console lintas app** — console terikat app `core`, atau bisa switch app? Default:
-   terikat `core`, app lain hanya lewat API.
-5. **Partisi `audit_events`** — belum perlu untuk MVP; siapkan kalau > 1k req/menit.
+
+### Keputusan yang sudah diambil (24 Okt 2026)
+
+Sisanya di atas (item 1) masih benar-benar terbuka: itu keputusan produk, bukan teknis.
+
+2. **Email case-insensitive → `citext`.** Diverifikasi nyata di image `postgres:18`
+   (18.6): `pg_available_extensions` memuat `citext 1.8`. Dipilih karena query tetap
+   `WHERE email = $1` tanpa `lower()` di setiap tempat — satu kelas bug hilang.
+   Kalau suatu saat pindah ke DB managed yang melarang extension, migrasi 0003 wajib:
+   `ALTER TABLE users ALTER COLUMN email TYPE text`, lalu unique index `lower(email)`.
+
+3. **Instant revocation → hanya di endpoint sensitif.** Cek `users.token_version` dilakukan
+   di mutasi role/permission, logout-all, ganti password, dan rotate secret. Tidak ada
+   query DB per request, tidak ada Redis di MVP. Konsekuensi yang diterima: token yang
+   sudah terbit tetap hidup sampai `exp` (≤15 menit) di route biasa.
+
+4. **Console terikat app `core`.** Tidak ada app switcher. App lain memakai API.
+   Konsekuensi: `permissions`/`roles` milik app lain tidak tampil di console core,
+   dan itu disengaja sampai ada kebutuhan nyata.
+
+5. **`audit_events` tidak dipartisi** di MVP. Ambang tinjauan ulang: > 1k request/menit
+   atau tabel melewati ~50 juta baris.
+
+6. **Log aplikasi → stdout saja (JSON di prod).** Tidak ada file log, tidak ada
+   `SANCA_LOG_DIR`, tidak ada `tracing-appender`. Alasan: nol kode rotasi, nol path yang
+   bisa hilang, dan container sudah menangkap stdout. Konsekuensi infra: Alloy tidak boleh
+   lagi men-tail `/var/log/sanca/*.log`; dia harus membaca log container
+   (`loki.source.docker` + mount `/var/run/docker.sock`) dan label `env` diisi per-deploy.
+   Volume `sanca_logs` dan env `SANCA_LOG_DIR` di `docker-compose.yml` jadi usang dan
+   dihapus saat Alloy disetel ulang.
+
+7. **Rotasi signing key → `SANCA_KEY_DIR`.** Satu file PEM per `kid` (0600), DB hanya
+   menyimpan public key + status. `JWT_PRIVATE_KEY_PEM`/`JWT_PRIVATE_KEY_PATH` tetap ada
+   sebagai jalur bootstrap dev, tapi bukan mekanisme rotasi. Tidak ada private key di DB
+   pada MVP ini; kalau nanti butuh multi-instance tanpa file share, opsi `SANCA_MASTER_KEY`
+   (envelope XChaCha20-Poly1305) dibuka lagi sebagai ADR baru.
