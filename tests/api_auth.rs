@@ -96,6 +96,23 @@ async fn fixture_user(pool: &PgPool) -> Uuid {
         .await
         .expect("gagal menghubungkan role dan permission");
 
+    // Route `GET /api/auth/me` butuh permission `auth:me`, jadi fixture ini
+    // memilikinya juga; tanpa itu `me` akan 403, bukan 200.
+    let me_permission_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO permissions (id, app_id, key, name) VALUES ($1, $2, 'auth:me', 'Identitas sendiri')")
+        .bind(me_permission_id)
+        .bind(core_app)
+        .execute(pool)
+        .await
+        .expect("gagal membuat permission me fixture");
+
+    sqlx::query("INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)")
+        .bind(role_id)
+        .bind(me_permission_id)
+        .execute(pool)
+        .await
+        .expect("gagal menghubungkan role dan permission me");
+
     sqlx::query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)")
         .bind(user.id)
         .bind(role_id)
@@ -106,14 +123,14 @@ async fn fixture_user(pool: &PgPool) -> Uuid {
     user.id
 }
 
-/// Request JSON dengan header app; token opsional.
+/// Request JSON; token opsional. App pemilik route ditentukan registry, jadi
+/// klien tidak lagi mengirim header app.
 fn json_request(method: &str, uri: &str, body: Value, token: Option<&str>) -> Request<Body> {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::USER_AGENT, "test-agent")
-        .header("x-sanca-app", APP);
+        .header(header::USER_AGENT, "test-agent");
 
     if let Some(token) = token {
         builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
@@ -183,7 +200,10 @@ async fn login_berhasil_lalu_me_mengembalikan_identitas(pool: PgPool) {
     assert_eq!(claims.sub, user_id.to_string());
     assert_eq!(claims.typ, "user");
     assert_eq!(claims.role, vec!["admin".to_string()]);
-    assert_eq!(claims.scope, vec!["users.read".to_string()]);
+    assert_eq!(
+        claims.scope,
+        vec!["auth:me".to_string(), "users.read".to_string()]
+    );
 
     // Tanpa token: 401.
     let (status, _, _) = send(&app, get_me(None)).await;

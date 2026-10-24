@@ -107,15 +107,34 @@ async fn send(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
     (status, body)
 }
 
-/// `GET /api/auth/me` dengan token dan slug app yang disebut klien.
-fn me_request(token: &str, app_slug: &str) -> Request<Body> {
+/// `GET /api/auth/me` dengan token. App pemilik route ditentukan registry,
+/// bukan header dari klien.
+fn me_request(token: &str) -> Request<Body> {
     Request::builder()
         .method("GET")
         .uri("/api/auth/me")
         .header(header::AUTHORIZATION, format!("Bearer {token}"))
-        .header("x-sanca-app", app_slug)
         .body(Body::empty())
         .unwrap()
+}
+
+/// Kredensial client untuk app `core`; dipakai menguji token service di route core.
+async fn fixture_core_credential(pool: &PgPool) -> (String, String) {
+    let app = apps::by_slug(pool, "core")
+        .await
+        .expect("query app core gagal")
+        .expect("app core harus ada dari seed");
+
+    let client_id = "core-client".to_string();
+    let secret = generate_client_secret();
+    let hash = hash_client_secret(&secret, &SecretString::from(client_pepper()))
+        .expect("gagal hashing secret fixture");
+
+    apps::create_credential(pool, app.id, &client_id, &hash)
+        .await
+        .expect("gagal menyimpan kredensial core");
+
+    (client_id, secret)
 }
 
 #[sqlx::test]
@@ -258,7 +277,7 @@ async fn app_tidak_aktif_tidak_bisa_menerbitkan_token(pool: PgPool) {
 
 #[sqlx::test]
 async fn token_service_ditolak_403_di_route_yang_butuh_user(pool: PgPool) {
-    let (_, client_id, secret) = fixture_app(&pool, "uji-m2m").await;
+    let (client_id, secret) = fixture_core_credential(&pool).await;
     let app = build_app(test_state(pool));
 
     let (status, body) = send(
@@ -269,8 +288,8 @@ async fn token_service_ditolak_403_di_route_yang_butuh_user(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
     let access = body["access_token"].as_str().unwrap();
 
-    // Token sah dan aud-nya cocok, tapi tipenya service: 403, bukan 401.
-    let (status_me, body_me) = send(&app, me_request(access, "uji-m2m")).await;
+    // Token sah dan aud-nya cocok (core), tapi scope-nya kosong: 403, bukan 401.
+    let (status_me, body_me) = send(&app, me_request(access)).await;
     assert_eq!(status_me, StatusCode::FORBIDDEN, "harus 403: {body_me}");
     assert_eq!(body_me["error"], "forbidden");
 }
@@ -290,8 +309,8 @@ async fn token_service_tidak_bisa_dipakai_lintas_app(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
     let access = body["access_token"].as_str().unwrap();
 
-    // Token aud=salak dipakai dengan header kelapa: aud tidak cocok, jadi 401.
-    let (status_lintas, body_lintas) = send(&app, me_request(access, "kelapa")).await;
+    // Token aud=salak dipakai di route app core: aud tidak cocok, jadi 401.
+    let (status_lintas, body_lintas) = send(&app, me_request(access)).await;
     assert_eq!(
         status_lintas,
         StatusCode::UNAUTHORIZED,

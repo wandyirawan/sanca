@@ -26,10 +26,17 @@ pub fn build_app(state: AppState) -> Router {
     // jalan lebih dulu (membuat id dan menaruhnya di header request), baru TraceLayer
     // membuat span yang sudah memuat id itu, lalu PropagateRequestId menyalinnya ke
     // respons. Tanpa Propagate, header tidak pernah terkirim balik ke klien.
+    //
+    // Penegakan registry dipasang lewat `layer`, jadi ia berjalan setelah router
+    // mencocokkan route dan `MatchedPath` sudah tersedia di request extensions.
     let request_id = axum::http::HeaderName::from_static("x-request-id");
 
     Router::new()
         .merge(api::router())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::rbac::enforce::enforce,
+        ))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::new(request_id.clone()))
@@ -49,6 +56,12 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
     crate::telemetry::init(&config);
 
     let state = build_state(&config).await?;
+
+    // Permission dari registry disalin ke database sebelum server melayani
+    // request, supaya konsol tidak pernah melihat katalog yang kosong.
+    crate::rbac::sync::sync(&state.pool)
+        .await
+        .context("gagal menyinkronkan permission registry")?;
 
     let listener = tokio::net::TcpListener::bind(&config.iam_bind).await?;
     tracing::info!(addr = %config.iam_bind, "sanca listening");

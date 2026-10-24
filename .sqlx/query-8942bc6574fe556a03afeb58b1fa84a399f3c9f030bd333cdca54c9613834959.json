@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO permissions (id, app_id, key, name, is_system)\n            SELECT $1, a.id, $2, $2, true\n            FROM apps a\n            WHERE a.slug = 'core'\n            ON CONFLICT DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8942bc6574fe556a03afeb58b1fa84a399f3c9f030bd333cdca54c9613834959"
+}
