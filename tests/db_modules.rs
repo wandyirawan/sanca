@@ -116,6 +116,27 @@ async fn sessions_insert_lookup_dan_revoke(pool: PgPool) {
         "sesi yang dicabut harus tidak ketemu"
     );
 
+    // Sesi yang lewat masa berlaku juga tidak boleh dikembalikan, walau belum dicabut.
+    sessions::insert(
+        &pool,
+        user_id,
+        app_id,
+        "hash-refresh-kedaluwarsa",
+        OffsetDateTime::now_utc() - time::Duration::minutes(1),
+        "uji-agent/1.0",
+        None,
+    )
+    .await
+    .expect("insert sesi kedaluwarsa gagal");
+
+    assert!(
+        sessions::by_refresh_hash(&pool, "hash-refresh-kedaluwarsa")
+            .await
+            .expect("by_refresh_hash error")
+            .is_none(),
+        "sesi kedaluwarsa harus tidak ketemu"
+    );
+
     // revoke_all_for_user_app menyapu semua sesi hidup user di app itu.
     let kedua = sessions::insert(
         &pool,

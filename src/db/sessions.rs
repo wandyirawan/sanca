@@ -44,7 +44,10 @@ pub async fn insert(
     .await
 }
 
-/// Cari sesi hidup lewat hash refresh token.
+/// Cari sesi yang masih boleh dipakai lewat hash refresh token.
+///
+/// Sesi yang sudah dicabut ATAU sudah lewat `expires_at` tidak dikembalikan, supaya
+/// pemanggil tidak perlu ingat memeriksa kedaluwarsa sendiri.
 pub async fn by_refresh_hash(pool: &PgPool, hash: &str) -> Result<Option<Session>, sqlx::Error> {
     sqlx::query_as!(
         Session,
@@ -53,6 +56,7 @@ pub async fn by_refresh_hash(pool: &PgPool, hash: &str) -> Result<Option<Session
         FROM sessions
         WHERE refresh_hash = $1
           AND revoked_at IS NULL
+          AND expires_at > now()
         "#,
         hash,
     )
