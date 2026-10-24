@@ -2,7 +2,7 @@ SHELL := /bin/bash
 DB_URL ?= postgres://sanca:sanca@localhost:5433/sanca_dev
 export DATABASE_URL := $(DB_URL)
 
-.PHONY: help db db-down dev run build test fmt clippy migrate prepare docker docker-run
+.PHONY: help db db-down dev run build test fmt clippy migrate prepare docker docker-run seed-admin
 
 help:            ## daftar target
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -37,6 +37,17 @@ migrate:         ## terapkan migrasi database
 
 prepare:         ## refresh cache .sqlx (wajib setelah ubah query)
 	cargo sqlx prepare -- --all-targets
+
+# Seed admin pertama. Password TIDAK boleh ditulis di Makefile atau argumen:
+# dibaca dari stdin, jadi tidak muncul di `ps` maupun riwayat shell.
+# Contoh: ADMIN_EMAIL=admin@contoh.id make seed-admin < password.txt
+seed-admin:      ## buat user superadmin (ADMIN_EMAIL, password dari stdin)
+	@test -n "$(ADMIN_EMAIL)" || (echo "ADMIN_EMAIL wajib diisi" >&2; exit 1)
+	cargo run --bin sanca -- user create \
+		--email "$(ADMIN_EMAIL)" \
+		--display-name "$(ADMIN_NAME)" \
+		--superadmin \
+		--password-stdin
 
 docker:          ## build image
 	docker build -t sanca:local .

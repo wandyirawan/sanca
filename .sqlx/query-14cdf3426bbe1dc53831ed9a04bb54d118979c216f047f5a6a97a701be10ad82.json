@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO users (id, email, password_hash, display_name)\n        VALUES ($1, $2, $3, $4)\n        RETURNING id, email::text AS \"email!\", password_hash,\n                  status AS \"status: UserStatus\", is_superadmin, token_version\n        ",
+  "query": "\n        INSERT INTO users (id, email, password_hash, pepper_version, display_name, is_superadmin)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id, email::text AS \"email!\", password_hash,\n                  status AS \"status: UserStatus\", is_superadmin, token_version\n        ",
   "describe": {
     "columns": [
       {
@@ -86,7 +86,9 @@
           }
         },
         "Text",
-        "Text"
+        "Int2",
+        "Text",
+        "Bool"
       ]
     },
     "nullable": [
@@ -98,5 +100,5 @@
       false
     ]
   },
-  "hash": "1bf529a6a2c64fe3006d792fe846e0059a651d7b0bf67dabaa004fa544bf9dad"
+  "hash": "14cdf3426bbe1dc53831ed9a04bb54d118979c216f047f5a6a97a701be10ad82"
 }
