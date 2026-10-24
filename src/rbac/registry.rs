@@ -104,6 +104,10 @@ pub const ROUTES: &[RouteDef] = &[
     protected(Method::GET, "/api/roles", "role:read"),
     protected(Method::POST, "/api/roles", "role:write"),
     protected(Method::GET, "/api/permissions", "role:read"),
+    protected(Method::GET, "/api/users", "user:read"),
+    protected(Method::POST, "/api/users", "user:write"),
+    protected(Method::GET, "/api/users/{id}", "user:read"),
+    protected(Method::PATCH, "/api/users/{id}", "user:write"),
 ];
 
 /// Cari definisi route berdasarkan method dan template path hasil `MatchedPath`.

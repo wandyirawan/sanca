@@ -198,6 +198,10 @@ fn registry_memuat_semua_route_router() {
         (Method::GET, "/api/roles"),
         (Method::POST, "/api/roles"),
         (Method::GET, "/api/permissions"),
+        (Method::GET, "/api/users"),
+        (Method::POST, "/api/users"),
+        (Method::GET, "/api/users/{id}"),
+        (Method::PATCH, "/api/users/{id}"),
     ];
 
     for (method, path) in routes {
@@ -225,7 +229,13 @@ fn permission_registry_unik_dan_terurut() {
 
     assert_eq!(
         permissions,
-        vec!["auth:me", "role:read", "role:write"],
+        vec![
+            "auth:me",
+            "role:read",
+            "role:write",
+            "user:read",
+            "user:write"
+        ],
         "katalog permission registry berubah; periksa handler dan test"
     );
 

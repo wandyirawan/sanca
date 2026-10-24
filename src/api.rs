@@ -4,6 +4,7 @@ pub mod jwks;
 pub mod me;
 pub mod rbac;
 pub mod token;
+pub mod users;
 
 use axum::Router;
 
@@ -22,4 +23,5 @@ pub fn router() -> Router<AppState> {
         .merge(me::router())
         .merge(token::router())
         .merge(rbac::router())
+        .merge(users::router())
 }

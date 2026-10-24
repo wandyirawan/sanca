@@ -18,6 +18,8 @@ pub enum AppError {
     NotFound,
     /// Input dari klien ditolak; pesannya aman ditampilkan.
     BadRequest(String),
+    /// Permintaan bentrok dengan data yang sudah ada, misalnya email duplikat.
+    Conflict(String),
     /// Terlalu banyak percobaan login gagal dalam jendela waktu.
     TooManyRequests,
     /// Kesalahan di sisi kita: jangan pernah bocorkan isinya.
@@ -32,6 +34,7 @@ impl AppError {
             AppError::Forbidden => "forbidden",
             AppError::NotFound => "not_found",
             AppError::BadRequest(_) => "bad_request",
+            AppError::Conflict(_) => "conflict",
             AppError::TooManyRequests => "too_many_requests",
             AppError::Internal => "internal",
         }
@@ -45,6 +48,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden => StatusCode::FORBIDDEN,
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
             AppError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -55,7 +59,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => "kredensial tidak valid atau sudah kedaluwarsa",
             AppError::Forbidden => "token tidak berlaku untuk aksi ini",
             AppError::NotFound => "resource tidak ditemukan",
-            AppError::BadRequest(detail) => detail.as_str(),
+            AppError::BadRequest(detail) | AppError::Conflict(detail) => detail.as_str(),
             AppError::TooManyRequests => "terlalu banyak percobaan login, coba lagi nanti",
             AppError::Internal => "terjadi kesalahan internal",
         };

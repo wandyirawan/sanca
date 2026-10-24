@@ -1,6 +1,7 @@
 //! Query dasar tabel `users`. Otorisasi, sesi, dan audit belum ada di phase ini.
 
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// Status akun, memetakan enum Postgres `user_status`.
@@ -21,6 +22,20 @@ pub struct User {
     pub status: UserStatus,
     pub is_superadmin: bool,
     pub token_version: i32,
+}
+
+/// Baris user untuk kebutuhan konsol: semua kolom yang boleh dilihat klien,
+/// tanpa `password_hash` dan `pepper_version`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct UserDetail {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub status: UserStatus,
+    pub is_superadmin: bool,
+    pub token_version: i32,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 
 /// Simpan user baru dengan default aman: bukan superadmin, pepper versi 1.
@@ -103,6 +118,147 @@ pub async fn by_email(pool: &PgPool, email: &str) -> Result<Option<User>, sqlx::
         WHERE email = $1::citext
         "#,
         email,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Satu baris user versi konsol, atau `None` kalau id tidak ada.
+pub async fn detail(pool: &PgPool, id: Uuid) -> Result<Option<UserDetail>, sqlx::Error> {
+    sqlx::query_as!(
+        UserDetail,
+        r#"
+        SELECT id, email::text AS "email!", display_name,
+               status AS "status: UserStatus", is_superadmin, token_version,
+               created_at, updated_at
+        FROM users
+        WHERE id = $1
+        "#,
+        id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Daftar user terurut email, dengan filter bebas pada email atau display_name.
+///
+/// `q` kosong atau berisi spasi saja diperlakukan sebagai tanpa filter, supaya
+/// klien tidak perlu tahu aturan itu.
+pub async fn list(
+    pool: &PgPool,
+    q: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<UserDetail>, sqlx::Error> {
+    let pattern = q
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| format!("%{text}%"));
+
+    sqlx::query_as!(
+        UserDetail,
+        r#"
+        SELECT id, email::text AS "email!", display_name,
+               status AS "status: UserStatus", is_superadmin, token_version,
+               created_at, updated_at
+        FROM users
+        WHERE $1::text IS NULL
+           OR email::text ILIKE $1
+           OR display_name ILIKE $1
+        ORDER BY email
+        LIMIT $2 OFFSET $3
+        "#,
+        pattern,
+        limit,
+        offset,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Ubah profil dan/atau status. Kolom yang `None` dibiarkan apa adanya.
+///
+/// Fungsi ini sengaja tidak menyentuh `token_version`: kenaikan versi adalah
+/// keputusan bisnis, jadi diputuskan di lapisan domain.
+pub async fn update_profile(
+    pool: &PgPool,
+    id: Uuid,
+    display_name: Option<&str>,
+    status: Option<UserStatus>,
+) -> Result<Option<UserDetail>, sqlx::Error> {
+    sqlx::query_as!(
+        UserDetail,
+        r#"
+        UPDATE users
+        SET display_name = COALESCE($2, display_name),
+            status = COALESCE($3::user_status, status),
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id, email::text AS "email!", display_name,
+                  status AS "status: UserStatus", is_superadmin, token_version,
+                  created_at, updated_at
+        "#,
+        id,
+        display_name,
+        status as Option<UserStatus>,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Ganti hash password sekaligus menaikkan `token_version`, sehingga seluruh
+/// token lama langsung ditolak. Mengembalikan versi baru, atau `None` kalau
+/// user tidak ada.
+pub async fn set_password(
+    pool: &PgPool,
+    id: Uuid,
+    password_hash: &str,
+) -> Result<Option<i32>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"
+        UPDATE users
+        SET password_hash = $2,
+            token_version = token_version + 1,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING token_version
+        "#,
+        id,
+        password_hash,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Nonaktifkan akun dan cabut semua tokennya dalam satu langkah.
+pub async fn disable(pool: &PgPool, id: Uuid) -> Result<Option<i32>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"
+        UPDATE users
+        SET status = 'disabled',
+            token_version = token_version + 1,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING token_version
+        "#,
+        id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
+/// Naikkan `token_version` tanpa mengubah kolom lain; dipakai saat akun
+/// diaktifkan kembali atau status berubah ke nilai selain `disabled`.
+pub async fn bump_token_version(pool: &PgPool, id: Uuid) -> Result<Option<i32>, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"
+        UPDATE users
+        SET token_version = token_version + 1,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING token_version
+        "#,
+        id,
     )
     .fetch_optional(pool)
     .await
