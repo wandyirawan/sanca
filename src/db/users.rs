@@ -72,6 +72,23 @@ pub async fn insert_with_flags(
     .await
 }
 
+/// Cari user lewat id. Dipakai jalur refresh, yang hanya memegang `user_id`
+/// dari baris sesi.
+pub async fn by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as!(
+        User,
+        r#"
+        SELECT id, email::text AS "email!", password_hash,
+               status AS "status: UserStatus", is_superadmin, token_version
+        FROM users
+        WHERE id = $1
+        "#,
+        id,
+    )
+    .fetch_optional(pool)
+    .await
+}
+
 /// Cari user lewat email. Kolomnya `citext`, jadi perbandingan tidak peduli kapital.
 pub async fn by_email(pool: &PgPool, email: &str) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as!(

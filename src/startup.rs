@@ -1,18 +1,27 @@
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 
+use anyhow::Context;
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
+use sqlx::postgres::PgPoolOptions;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::api;
+use crate::auth::keys::SigningKey;
 use crate::cli::Cli;
 use crate::config::Config;
+use crate::state::AppState;
 
-/// Merakit `Router` aplikasi lengkap dengan layer observability.
+/// Batas ukuran body request. Semua endpoint saat ini hanya menerima JSON kecil,
+/// jadi 16 KiB sudah longgar dan menutup body raksasa sebelum diparse.
+const MAX_BODY_BYTES: usize = 16 * 1024;
+
+/// Merakit `Router` aplikasi lengkap dengan state dan layer observability.
 ///
 /// Dipakai oleh `main` dan oleh test integrasi supaya wiring tidak diduplikasi.
-pub fn build_app() -> Router {
+pub fn build_app(state: AppState) -> Router {
     // Urutan layer: yang ditambahkan paling akhir = paling luar. Jadi SetRequestId
     // jalan lebih dulu (membuat id dan menaruhnya di header request), baru TraceLayer
     // membuat span yang sudah memuat id itu, lalu PropagateRequestId menyalinnya ke
@@ -21,9 +30,11 @@ pub fn build_app() -> Router {
 
     Router::new()
         .merge(api::router())
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::new(request_id.clone()))
         .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))
+        .with_state(state)
 }
 
 /// Titik masuk aplikasi: baca config, jalankan healthcheck atau serve.
@@ -37,10 +48,35 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
 
     crate::telemetry::init(&config);
 
+    let state = build_state(&config).await?;
+
     let listener = tokio::net::TcpListener::bind(&config.iam_bind).await?;
     tracing::info!(addr = %config.iam_bind, "sanca listening");
-    axum::serve(listener, build_app()).await?;
+
+    // ConnectInfo dipakai rate limit login untuk mengenali IP klien saat tidak
+    // ada reverse proxy di depan.
+    axum::serve(
+        listener,
+        build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
+}
+
+/// Siapkan pool database dan signing key dari config yang sudah dibaca.
+async fn build_state(config: &Config) -> anyhow::Result<AppState> {
+    let database_url = std::env::var("DATABASE_URL")
+        .context("DATABASE_URL wajib diisi untuk menjalankan server")?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url)
+        .await
+        .context("gagal terhubung ke database")?;
+
+    let signing = SigningKey::load_or_generate(config).context("gagal menyiapkan signing key")?;
+
+    Ok(AppState::new(pool, config.clone(), signing))
 }
 
 /// Probe HTTP mentah ke `/healthz` lewat loopback. Exit 0 hanya kalau respons

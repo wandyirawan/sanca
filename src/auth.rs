@@ -3,6 +3,7 @@
 //! Modul ini tidak tahu HTTP. Handler, cookie, dan refresh token hidup di lane
 //! transport; di sini hanya operasi murni yang bisa diuji tanpa server.
 
+pub mod extractor;
 pub mod jwt;
 pub mod keys;
 pub mod password;

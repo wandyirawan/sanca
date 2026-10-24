@@ -1,9 +1,19 @@
+pub mod auth;
 pub mod health;
+pub mod jwks;
+pub mod me;
 
 use axum::Router;
 
-/// Router API JSON. Untuk sekarang hanya berisi route kesehatan; area lain
-/// (auth, users, apps, rbac, audit) menyusul di phase berikutnya.
-pub fn router() -> Router {
-    health::router()
+use crate::state::AppState;
+
+/// Router API JSON: kesehatan, JWKS publik, dan endpoint auth.
+///
+/// Route lain (users, apps, rbac, audit) menyusul di phase berikutnya.
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .merge(health::router())
+        .merge(jwks::router())
+        .merge(auth::router())
+        .merge(me::router())
 }
