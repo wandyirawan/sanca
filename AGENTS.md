@@ -948,6 +948,13 @@ Sisanya di atas (item 1) masih benar-benar terbuka: itu keputusan produk, bukan 
    Kalau suatu saat pindah ke DB managed yang melarang extension, migrasi 0003 wajib:
    `ALTER TABLE users ALTER COLUMN email TYPE text`, lalu unique index `lower(email)`.
 
+   **Jebakan wajib diingat (diuji, bukan teori):** bind parameter Rust bertipe `text`,
+   jadi `WHERE email = $1` membandingkan `citext` dengan `text` secara case-SENSITIVE —
+   tes langsung di psql: parameter tanpa cast menghasilkan 0 baris, dengan `$1::citext`
+   menghasilkan 1 baris. Setiap query yang membandingkan kolom `citext` wajib menulis
+   cast eksplisit `= $n::citext`. Ini berlaku untuk `users.email` dan apa pun yang
+   memakai tipe itu nanti.
+
 3. **Instant revocation → hanya di endpoint sensitif.** Cek `users.token_version` dilakukan
    di mutasi role/permission, logout-all, ganti password, dan rotate secret. Tidak ada
    query DB per request, tidak ada Redis di MVP. Konsekuensi yang diterima: token yang
