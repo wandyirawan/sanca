@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE app_credentials\n        SET revoked_at = now()\n        WHERE app_id = $1\n          AND revoked_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3c0e6370d5479e29433fad8d62fd3d6ad3b8ebf16d7679637f7189edffa50063"
+}

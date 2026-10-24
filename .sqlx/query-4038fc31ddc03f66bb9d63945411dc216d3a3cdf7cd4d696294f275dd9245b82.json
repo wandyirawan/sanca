@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO audit_events\n            (app_id, app_slug, actor_type, actor_user_id, action,\n             method, path, status_code, request_id, metadata)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::int2, $9, $10)\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        {
+          "Custom": {
+            "name": "actor_type",
+            "kind": {
+              "Enum": [
+                "user",
+                "service",
+                "system"
+              ]
+            }
+          }
+        },
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int2",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4038fc31ddc03f66bb9d63945411dc216d3a3cdf7cd4d696294f275dd9245b82"
+}
