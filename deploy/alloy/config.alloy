@@ -1,0 +1,64 @@
+// Grafana Alloy — tail file log Sanca, kirim ke Loki.
+// Prinsip: label HARUS low-cardinality. app/env/level saja.
+// request_id, user_id, path, ip, trace_id => bagian dari JSON body, BUKAN label.
+
+local.file_match "sanca" {
+  path_targets = [{
+    __path__ = "/var/log/sanca/*.log*",   // *.log* wajib: nama file berubah tiap rotasi harian
+    app      = "sanca",
+    env      = "local",
+    job      = "sanca",
+  }]
+}
+
+loki.source.file "sanca" {
+  targets    = local.file_match.sanca.targets
+  forward_to = [loki.process.sanca.receiver]
+
+  // Baca dari awal file yang sudah ada saat Alloy start, lalu ikuti (tail).
+  tail_from_end = false
+}
+
+loki.process "sanca" {
+  forward_to = [loki.write.local.receiver]
+
+  // Ambil level dari JSON supaya bisa filter cepat di Grafana:
+  // {app="sanca", level="ERROR"}
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "",   // "" = pakai hasil stage.json
+    }
+  }
+
+  // Jaring pengaman: kalau level kosong/aneh, jangan bikin stream baru per nilai.
+  stage.static_labels {
+    values = {
+      source = "file",
+    }
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+
+    batch_size = "512KiB"
+    batch_wait = "2s"
+
+    // 429 dari Loki (kena limit) dianggap recoverable -> retry dengan backoff.
+    retry_on_http_429  = true
+    min_backoff_period = "1s"
+    max_backoff_period = "1m"
+    max_backoff_retries = 10
+  }
+
+  // WAL sengaja TIDAK diaktifkan: di Alloy WAL `loki.write` masih experimental
+  // (butuh stability.level = experimental). File log dari Sanca sudah jadi buffer
+  // (tail_from_end = false => saat Alloy restart, file yang belum terkirim dibaca ulang).
+}

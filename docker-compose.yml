@@ -1,0 +1,120 @@
+name: sanca
+
+services:
+  # ---------------------------------------------------------------- database
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: sanca
+      POSTGRES_PASSWORD: sanca
+      POSTGRES_DB: sanca_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      # PG18: PGDATA=/var/lib/postgresql/18/docker dan VOLUME=/var/lib/postgresql.
+      # Mount di /var/lib/postgresql/data (layout PG17) = data masuk anonymous volume,
+      # hilang tiap container di-recreate.
+      - sanca_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sanca -d sanca_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # ------------------------------------------------------------------- app
+  # docker compose --profile app up -d --build
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false      # Phase 0 belum bikin .env; compose tetap valid tanpa itu
+    environment:
+      DATABASE_URL: postgres://sanca:sanca@db:5432/sanca_dev
+      IAM_BIND: 0.0.0.0:8080
+      SANCA_ENV: prod
+      SANCA_LOG_FORMAT: json
+      SANCA_LOG_DIR: /var/log/sanca
+    ports:
+      - "8080:8080"
+    volumes:
+      - sanca_logs:/var/log/sanca
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp"]
+    healthcheck:
+      test: ["CMD", "/app/sanca", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ------------------------------------------------------- observability (obs)
+  # docker compose --profile obs up -d
+  loki:
+    profiles: ["obs"]
+    image: grafana/loki:3.7.1
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./deploy/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    healthcheck:
+      # Loki >=3.6 tidak punya shell/wget (busybox dihapus), jadi healthcheck
+      # pakai subcommand bawaannya sendiri: `loki -health` (exit != 0 kalau belum ready).
+      test: ["CMD", "/usr/bin/loki", "-health", "--health.url=http://127.0.0.1:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  alloy:
+    profiles: ["obs"]
+    image: grafana/alloy:latest
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - sanca_logs:/var/log/sanca:ro
+      - alloy_data:/var/lib/alloy/data
+    ports:
+      - "12345:12345"
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    profiles: ["obs"]
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  sanca_pgdata:
+  sanca_logs:
+  loki_data:
+  alloy_data:
+  grafana_data:

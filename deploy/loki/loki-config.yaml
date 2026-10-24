@@ -1,0 +1,71 @@
+# Loki 3.7 — single binary, storage filesystem, retensi 90 hari.
+# Tanpa Garage/S3. Kalau nanti pindah ke S3, chunk lama TIDAK ikut (Loki tidak migrasi
+# backend) — jadi keputusan ini komit.
+
+auth_enabled: false          # single tenant; reverse proxy yang menangani auth
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn            # jangan info: log Loki sendiri tidak perlu verbose
+  log_format: json
+
+common:
+  path_prefix: /loki
+  replication_factor: 1      # single node
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h          # WAJIB 24h: retensi compactor hanya jalan dengan index period 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+
+limits_config:
+  # --- retensi ---
+  retention_period: 2160h    # 90 hari. Perubahan TIDAK retroaktif.
+  max_query_lookback: 2160h
+
+  # --- pengaman anti-meledak (angka kecil, sengaja) ---
+  ingestion_rate_mb: 4               # MB/detik per tenant
+  ingestion_burst_size_mb: 8
+  per_stream_rate_limit: 512KB       # per stream (label set) per detik
+  per_stream_rate_limit_burst: 2MB
+  max_streams_per_user: 2000         # stream baru terus = tanda label cardinality bocor
+  max_entries_limit_per_query: 5000  # batasi ukuran respons (bukan jumlah baris tersimpan)
+  max_query_series: 500              # query yang menghasilkan >500 series = label salah
+  max_query_length: 721h             # satu query maksimum ~30 hari; dashboard tidak boleh nagih 90 hari
+  max_line_size: 64KB                # satu baris >64KB = kemungkinan body ter-log tanpa sengaja
+  max_line_size_truncate: true       # pangkas, jangan tolak (log tetap masuk, lebih baik terpotong)
+
+  # --- tolak data aneh ---
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  creation_grace_period: 10m
+
+compactor:
+  working_directory: /loki/compactor     # marker file; butuh volume persistent
+  retention_enabled: true                # default mati -> log hidup selamanya
+  compaction_interval: 10m
+  apply_retention_interval: 30m
+  retention_delete_delay: 2h             # jeda sebelum chunk benar-benar dihapus
+  retention_delete_worker_count: 50
+  delete_request_store: filesystem       # wajib saat retention_enabled
+
+# Querier/frontend dibiarkan default single-binary.
+# Sengaja TIDAK ada `ruler` dan TIDAK ada alerting rules di Loki: alerting di Grafana.
