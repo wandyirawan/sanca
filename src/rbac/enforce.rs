@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::auth::extractor::authenticate;
 use crate::error::AppError;
-use crate::rbac::registry;
+use crate::rbac::registry::{self, Access};
 use crate::state::AppState;
 
 /// Kebijakan sadar: klaim `role` yang memuat `superadmin` dianggap memiliki
@@ -40,14 +40,16 @@ pub async fn enforce(State(state): State<AppState>, mut request: Request, next: 
         return AppError::Internal.into_response();
     };
 
-    let Some(permission) = route.permission else {
+    // Route publik tidak menyentuh token sama sekali; verifikasi hanya
+    // membuang waktu untuk health check dan JWKS.
+    if route.access == Access::Public {
         return next.run(request).await;
-    };
+    }
 
-    // Route berpermission selalu terikat satu app; tanpa slug tidak ada yang
+    // Route ber-token selalu terikat satu app; tanpa slug tidak ada yang
     // bisa diverifikasi, jadi perlakukan sebagai kesalahan konfigurasi.
     let Some(slug) = route.scope.app_slug() else {
-        tracing::error!(%method, path = %path, "route berpermission tanpa app scope");
+        tracing::error!(%method, path = %path, "route ber-token tanpa app scope");
         return AppError::Internal.into_response();
     };
 
@@ -56,7 +58,9 @@ pub async fn enforce(State(state): State<AppState>, mut request: Request, next: 
         Err(err) => return err.into_response(),
     };
 
-    if !allowed(&auth.claims, permission) {
+    if let Access::Permission(permission) = route.access
+        && !allowed(&auth.claims, permission)
+    {
         return AppError::Forbidden.into_response();
     }
 

@@ -206,12 +206,13 @@ fn registry_memuat_semua_route_router() {
         assert_eq!(found.path, path);
     }
 
-    // Route publik tidak boleh punya permission.
+    // Route publik harus publik di kedua sumbu: tanpa token, tanpa app.
     for route in registry::ROUTES {
-        if route.scope == registry::AppScope::Public {
-            assert!(
-                route.permission.is_none(),
-                "route publik {} masih punya permission",
+        if route.access == registry::Access::Public {
+            assert_eq!(
+                route.scope,
+                registry::AppScope::Public,
+                "route publik {} tidak boleh terikat app",
                 route.path
             );
         }
@@ -233,6 +234,10 @@ fn permission_registry_unik_dan_terurut() {
         unique.len(),
         permissions.len(),
         "permission tidak boleh duplikat"
+    );
+    assert!(
+        permissions.contains(&"auth:me"),
+        "auth:me tetap didaftarkan supaya matrix console punya barisnya"
     );
     assert!(
         permissions.iter().all(|key| key.contains(':')),
@@ -412,4 +417,82 @@ async fn route_publik_tetap_200_tanpa_token(pool: PgPool) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "jwks harus 200: {body}");
+}
+
+#[sqlx::test]
+async fn user_tanpa_role_boleh_get_me_200(pool: PgPool) {
+    sync_permissions(&pool).await;
+
+    // User tanpa role sama sekali: tidak ada baris user_roles.
+    let hash = hash_password(PASSWORD, &SecretString::from(pepper())).expect("hash password gagal");
+    users::insert(&pool, "tanpa-role@example.com", &hash, "Tanpa Role")
+        .await
+        .expect("gagal membuat user tanpa role");
+
+    let app = build_app(test_state(pool));
+    let token = login(&app, "tanpa-role@example.com", "core").await;
+
+    let (status, body) = send(
+        &app,
+        json_request("GET", "/api/auth/me", Value::Null, Some(&token)),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "me harus 200 untuk setiap user yang login: {body}"
+    );
+    assert_eq!(body["app"], "core");
+    assert_eq!(
+        body["scope"],
+        json!([]),
+        "user tanpa role punya scope kosong"
+    );
+
+    // Route berpermission tetap menolak user yang sama.
+    let (status, body) = send(
+        &app,
+        json_request("GET", "/api/roles", Value::Null, Some(&token)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "roles harus 403: {body}");
+}
+
+#[sqlx::test]
+async fn anonymous_ke_me_ditolak_401(pool: PgPool) {
+    sync_permissions(&pool).await;
+    let app = build_app(test_state(pool));
+
+    let (status, body) = send(&app, json_request("GET", "/api/auth/me", Value::Null, None)).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "me anonim harus 401: {body}"
+    );
+    assert_eq!(body["error"], "unauthorized");
+}
+
+#[sqlx::test]
+async fn superadmin_get_roles_tetap_200(pool: PgPool) {
+    sync_permissions(&pool).await;
+    let user_id = fixture_user(&pool, "super-me@example.com", "tanpa-izin", &[]).await;
+    give_superadmin(&pool, user_id).await;
+    let app = build_app(test_state(pool));
+
+    let token = login(&app, "super-me@example.com", "core").await;
+
+    let (status, body) = send(
+        &app,
+        json_request("GET", "/api/roles", Value::Null, Some(&token)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "superadmin roles harus 200: {body}");
+
+    let (status, body) = send(
+        &app,
+        json_request("GET", "/api/auth/me", Value::Null, Some(&token)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "superadmin me harus 200: {body}");
+    assert_eq!(body["typ"], "user");
 }
