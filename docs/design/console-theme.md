@@ -119,7 +119,8 @@ teks di atas `primary`/`error` adalah dua yang paling tipis, jangan digeser tanp
 
 ## 4. Tipografi
 
-Modern-sci-fi yang tetap terbaca untuk tabel data — dua keluarga, tidak lebih:
+Modern-sci-fi yang tetap terbaca untuk tabel data — dua keluarga, tidak lebih.
+**Keputusan 25 Okt 2026: Space Grotesk + JetBrains Mono. Chakra Petch tidak dipakai.**
 
 | Peran | Font | Alasan |
 |---|---|---|
