@@ -985,3 +985,35 @@ Sisanya di atas (item 1) masih benar-benar terbuka: itu keputusan produk, bukan 
    sebagai jalur bootstrap dev, tapi bukan mekanisme rotasi. Tidak ada private key di DB
    pada MVP ini; kalau nanti butuh multi-instance tanpa file share, opsi `SANCA_MASTER_KEY`
    (envelope XChaCha20-Poly1305) dibuka lagi sebagai ADR baru.
+
+---
+
+## 15. Konvensi commit dan push
+
+Aturan operasional, bukan saran:
+
+1. **Setiap phase (atau subtask yang lolos verifikasi) langsung di-commit dan di-push.**
+   Pekerjaan yang belum ada di `origin/master` dianggap belum selesai. Jangan menumpuk
+   beberapa phase dalam satu commit besar, dan jangan menunggu "nanti kalau sudah rapi".
+2. **Format pesan = Conventional Commits.**
+   ```
+   <type>(<scope>): <ringkasan imperatif, ≤ 72 karakter, tanpa titik di akhir>
+
+   <body: apa yang berubah dan kenapa, bungkus di 72 kolom>
+
+   <footer opsional: refs, breaking change>
+   ```
+3. **Type yang dipakai:** `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`,
+   `ci`, `chore`. Tidak ada type karangan sendiri.
+4. **Scope = area nyata di repo, huruf kecil:** `db`, `api`, `auth`, `rbac`, `console`,
+   `telemetry`, `config`, `deploy`, `deps`, `agents`, `readme`, `ci`, `phase0`…`phase7`
+   bila commit memang menutup satu phase. Satu commit satu scope; kalau berubah di banyak
+   area, pecah commit-nya.
+5. **Judul dalam bahasa imperatif, bukan laporan:** `feat(auth): terbitkan access token
+   RS256 dengan aud per app`, bukan `menambahkan token` atau `update auth`.
+6. **Body menjelaskan alasan dan konsekuensi**, bukan mengulang judul. Kalau ada perubahan
+   yang memengaruhi kompatibilitas, tulis di footer `BREAKING CHANGE:`.
+7. **Jangan pernah** commit berisi `.env`, private key, `target/`, atau perubahan yang
+   membuat `cargo test`/`clippy` merah.
+8. Riwayat lama tidak ditulis ulang. Konvensi berlaku untuk commit baru; repo publik, jadi
+   `git push --force` ke `master` dilarang.
