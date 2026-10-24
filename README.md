@@ -26,7 +26,7 @@ Belum bisa dipakai sebagai IAM. Yang ada baru kerangka + skema database.
 |---|---|
 | Crate Rust (axum 0.8, edition 2024), `/healthz`, tracing, request-id | selesai |
 | Skema PostgreSQL 18 (11 tabel: users, apps, sessions, rbac, audit, signing_keys) | selesai |
-| Query inti: `users::insert`, `users::by_email`, `rbac::resolve_scope` | selesai |
+| Query inti: users, apps + credential, sessions, audit, signing keys, `resolve_scope` | selesai |
 | Login/logout/refresh, JWT + JWKS | belum |
 | App registry + M2M token (`client_credentials`) | belum |
 | RBAC enforcement middleware + registry route | belum |
@@ -114,6 +114,7 @@ Secret tidak pernah masuk `Cargo.toml`, config file, argumen CLI, atau log.
 | `IAM_BIND` | `127.0.0.1:8080` | alamat listen |
 | `SANCA_ENV` | `dev` | `dev` atau `prod` |
 | `SANCA_LOG_FORMAT` | `pretty` | `pretty` atau `json` |
+| `SANCA_LOG_DIR` | `/var/log/sanca` | folder file log, rotasi harian, di-tail Alloy |
 | `RUST_LOG` | `info` | filter tracing |
 
 ## Lisensi

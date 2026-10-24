@@ -564,7 +564,9 @@ SANCA_MASTER_KEY=                            # opsional: envelope XChaCha20-Poly
 Precedence signing key: `JWT_PRIVATE_KEY_PEM` → `JWT_PRIVATE_KEY_PATH` → generate baru
 **hanya di `SANCA_ENV=dev`** (dengan warning). `SANCA_ENV=prod` tanpa key = exit 1.
 
-Aturan: `.env` gitignored + `chmod 600`; `.env.example` hanya nama variabel; secret dibungkus
+Aturan: `.env` gitignored + `chmod 600`; `.env.example` memuat nama variabel beserta
+nilai default yang bukan rahasia (bind, direktori log, format) dan tidak pernah memuat
+nilai secret; secret dibungkus
 `secrecy::SecretString` (Debug = `***`); buffer kunci `zeroize` setelah dipakai; secret
 tidak pernah lewat argv (kelihatan di `ps`).
 
@@ -603,7 +605,7 @@ head -c 32 /dev/urandom | base64   # SESSION_COOKIE_KEY
 | | Log | Audit (`audit_events`) | Metrik |
 |---|---|---|---|
 | Pertanyaan | "kenapa request ini gagal?" | "siapa melakukan apa, kapan" | "seberapa sering/lama?" |
-| Penyimpanan | stdout → Loki | tabel Postgres | scrape Prometheus |
+| Penyimpanan | file JSON di `SANCA_LOG_DIR` → Alloy → Loki | tabel Postgres | scrape Prometheus |
 | Retensi | pendek (30 hari) | panjang (kebijakan) | pendek, agregat |
 | Sumber | `tracing` | ditulis `domain/` saat aksi sukses | counter/histogram |
 | Boleh hilang? | ya, best-effort | tidak (bagian dari kontrak produk) | ya |
@@ -615,8 +617,10 @@ error internal (itu tugas log). Keduanya ditulis dari titik kode yang berbeda.
 
 - `tracing` 0.1.44 + `tracing-subscriber` 0.3.23 (feature `env-filter`, `json`, `fmt`).
   Sudah masuk sejak Phase 0 — `src/telemetry.rs`.
-- **Dev**: format `pretty` + ANSI. **Prod**: JSON satu baris per event ke stdout.
-  Switch via env `SANCA_LOG_FORMAT=pretty|json` (bukan secret, boleh di env).
+- **Dev**: format `pretty` + ANSI ke terminal. **Prod**: JSON satu baris per event ke
+  `SANCA_LOG_DIR/sanca.<tanggal>.log` (rotasi harian, `tracing-appender` 0.2.5) dan juga
+  ke stdout supaya `docker logs` tetap berguna saat debug.
+  Switch format via env `SANCA_LOG_FORMAT=pretty|json` (bukan secret, boleh di env).
 - Filter via `RUST_LOG`, default `info`, dengan override per-target:
   `RUST_LOG=info,sanca::db=debug,tower_http=warn`.
 - OTel (opsional, Phase 7): `tracing-opentelemetry` 0.34.0 + `opentelemetry-otlp` 0.33.1
@@ -967,13 +971,14 @@ Sisanya di atas (item 1) masih benar-benar terbuka: itu keputusan produk, bukan 
 5. **`audit_events` tidak dipartisi** di MVP. Ambang tinjauan ulang: > 1k request/menit
    atau tabel melewati ~50 juta baris.
 
-6. **Log aplikasi → stdout saja (JSON di prod).** Tidak ada file log, tidak ada
-   `SANCA_LOG_DIR`, tidak ada `tracing-appender`. Alasan: nol kode rotasi, nol path yang
-   bisa hilang, dan container sudah menangkap stdout. Konsekuensi infra: Alloy tidak boleh
-   lagi men-tail `/var/log/sanca/*.log`; dia harus membaca log container
-   (`loki.source.docker` + mount `/var/run/docker.sock`) dan label `env` diisi per-deploy.
-   Volume `sanca_logs` dan env `SANCA_LOG_DIR` di `docker-compose.yml` jadi usang dan
-   dihapus saat Alloy disetel ulang.
+6. **Log aplikasi → file di `SANCA_LOG_DIR` (default `/var/log/sanca`), rotasi harian.**
+   `tracing-appender` 0.2.5 (`RollingFileAppender::builder().rotation(Rotation::DAILY)`),
+   file `sanca.<tanggal>.log`, plus stdout tetap ditulis untuk `docker logs` saat debug.
+   Alloy men-tail `/var/log/sanca/*.log*` → Loki (sudah terpasang di `deploy/alloy`), jadi
+   volume `sanca_logs` di `docker-compose.yml` tetap dipakai dan `SANCA_LOG_DIR` adalah env
+   resmi (masuk `config.rs` dan `.env.example`). Konsekuensi yang diterima: kode rotasi ikut
+   masuk aplikasi, dan file log adalah bagian dari kontrak operasional — bukan sekadar efek
+   samping container.
 
 7. **Rotasi signing key → `SANCA_KEY_DIR`.** Satu file PEM per `kid` (0600), DB hanya
    menyimpan public key + status. `JWT_PRIVATE_KEY_PEM`/`JWT_PRIVATE_KEY_PATH` tetap ada
