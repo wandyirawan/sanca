@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 
 use crate::auth::password::hash_password;
 use crate::config::Config;
-use crate::db::users;
+use crate::db::{rbac, users};
 
 /// Sanca — IAM service ringan berbasis Rust + PostgreSQL.
 #[derive(Parser, Debug)]
@@ -84,8 +84,12 @@ pub async fn run_user_command(command: &UserCommand) -> anyhow::Result<()> {
                 bail!("email {email} sudah terdaftar");
             }
 
+            // Satu transaksi: user dan keanggotaan role superadmin lahir bersama,
+            // supaya tidak pernah ada admin dengan `"role": []` di tokennya.
+            let mut tx = pool.begin().await.context("gagal memulai transaksi")?;
+
             let user = users::insert_with_flags(
-                &pool,
+                &mut *tx,
                 email,
                 &hash,
                 display_name,
@@ -95,10 +99,22 @@ pub async fn run_user_command(command: &UserCommand) -> anyhow::Result<()> {
             .await
             .context("gagal menyimpan user")?;
 
+            if *superadmin {
+                let role_ditemukan = rbac::assign_system_superadmin(&mut tx, user.id)
+                    .await
+                    .context("gagal memberi role superadmin")?;
+                if !role_ditemukan {
+                    // Transaksi dibatalkan oleh drop, jadi tidak ada user tanpa role.
+                    bail!("role superadmin app core tidak ditemukan; seed core belum dijalankan?");
+                }
+            }
+
+            tx.commit().await.context("gagal menyimpan transaksi")?;
+
             // Hanya id dan email; password maupun hash tidak pernah dicetak.
             println!("user dibuat: {} {}", user.id, user.email);
             if user.is_superadmin {
-                println!("superadmin: ya");
+                println!("superadmin: ya (role superadmin app core)");
             }
             Ok(())
         }

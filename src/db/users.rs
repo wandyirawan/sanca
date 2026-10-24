@@ -45,14 +45,17 @@ pub async fn insert(
 ///
 /// Dipakai subcommand `sanca user create`; parameter eksplisit supaya jalur
 /// pembuatan admin tidak perlu UPDATE susulan yang bisa lupa dijalankan.
-pub async fn insert_with_flags(
-    pool: &PgPool,
+pub async fn insert_with_flags<'e, E>(
+    executor: E,
     email: &str,
     password_hash: &str,
     display_name: &str,
     is_superadmin: bool,
     pepper_version: i16,
-) -> Result<User, sqlx::Error> {
+) -> Result<User, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     sqlx::query_as!(
         User,
         r#"
@@ -68,7 +71,7 @@ pub async fn insert_with_flags(
         display_name,
         is_superadmin,
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
 }
 

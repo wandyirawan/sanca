@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT r.id\n        FROM roles r\n        JOIN apps a ON a.id = r.app_id\n        WHERE a.slug = 'core'\n          AND r.key = 'superadmin'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "roles",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "66462def60079ca0329612532c9a8555daa30296a6e8cfc7351e4a7c3d02919a"
+}

@@ -12,6 +12,7 @@ use sanca::auth::jwt::{self, Claims};
 use sanca::auth::keys::SigningKey;
 use sanca::auth::password::{hash_password, verify_password};
 use sanca::config::{Config, Environment, LogFormat};
+use sanca::db::rbac;
 use secrecy::SecretString;
 
 /// Pepper 32 byte untuk test; dibuat di sini supaya tidak ada nilai rahasia di repo.
@@ -51,6 +52,51 @@ fn claims(iss: &str, aud: &str, exp_offset: i64) -> Claims {
         iat: now,
         exp: now + exp_offset,
     }
+}
+
+/// Jalankan `sanca user create` sungguhan, seperti yang dipakai operator.
+fn jalankan_user_create(database_url: &str, email: &str, superadmin: bool) -> std::process::Output {
+    let mut args = vec![
+        "user".to_string(),
+        "create".to_string(),
+        "--email".to_string(),
+        email.to_string(),
+        "--password-stdin".to_string(),
+        "--display-name".to_string(),
+        "Uji CLI".to_string(),
+    ];
+    if superadmin {
+        args.push("--superadmin".to_string());
+    }
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_sanca"))
+        .args(&args)
+        .env("DATABASE_URL", database_url)
+        .env("ARGON2_PEPPER", test_pepper())
+        .env("ARGON2_PEPPER_VERSION", "1")
+        .env("SANCA_ENV", "dev")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("jalankan binary sanca");
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"password-uji-yang-panjang")
+        .expect("tulis password");
+
+    child.wait_with_output().expect("tunggu proses")
+}
+
+/// Id app `core` hasil seed `0002_seed_core_app.sql`.
+async fn app_core_id(pool: &sqlx::PgPool) -> uuid::Uuid {
+    sqlx::query_scalar!(r#"SELECT id FROM apps WHERE slug = 'core'"#)
+        .fetch_one(pool)
+        .await
+        .expect("app core harus ada; jalankan seed core")
 }
 
 #[test]
@@ -245,6 +291,90 @@ async fn cli_user_create_menyimpan_superadmin() {
     );
 
     sqlx::query!(r#"DELETE FROM users WHERE email = $1::citext"#, email)
+        .execute(&pool)
+        .await
+        .expect("bersihkan user uji");
+}
+
+/// `user create --superadmin` harus ikut menulis `user_roles` di app `core`,
+/// karena klaim `role` pada token dibaca dari sana, bukan dari `is_superadmin`.
+#[tokio::test]
+async fn cli_user_create_superadmin_mendapat_role_superadmin_app_core() {
+    let Ok(database_url) = std::env::var("DATABASE_URL") else {
+        eprintln!("lewati: DATABASE_URL tidak diset, test CLI butuh database");
+        return;
+    };
+
+    let email = format!("cli-role-{}@sanca.test", std::process::id());
+    let pool = sqlx::PgPool::connect(&database_url)
+        .await
+        .expect("koneksi database test");
+
+    let output = jalankan_user_create(&database_url, &email, true);
+    assert!(
+        output.status.success(),
+        "user create gagal: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let app_core = app_core_id(&pool).await;
+    let user_id = sqlx::query_scalar!(r#"SELECT id FROM users WHERE email = $1::citext"#, email)
+        .fetch_one(&pool)
+        .await
+        .expect("user harus tersimpan");
+
+    let roles = rbac::resolve_roles(&pool, user_id, app_core)
+        .await
+        .expect("resolve role");
+
+    assert_eq!(
+        roles,
+        vec!["superadmin".to_string()],
+        "admin harus punya role superadmin di app core"
+    );
+
+    sqlx::query!(r#"DELETE FROM users WHERE id = $1"#, user_id)
+        .execute(&pool)
+        .await
+        .expect("bersihkan user uji");
+}
+
+/// Tanpa `--superadmin`: tidak ada baris `user_roles` sama sekali.
+#[tokio::test]
+async fn cli_user_create_tanpa_superadmin_tidak_punya_role() {
+    let Ok(database_url) = std::env::var("DATABASE_URL") else {
+        eprintln!("lewati: DATABASE_URL tidak diset, test CLI butuh database");
+        return;
+    };
+
+    let email = format!("cli-biasa-{}@sanca.test", std::process::id());
+    let pool = sqlx::PgPool::connect(&database_url)
+        .await
+        .expect("koneksi database test");
+
+    let output = jalankan_user_create(&database_url, &email, false);
+    assert!(
+        output.status.success(),
+        "user create gagal: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let app_core = app_core_id(&pool).await;
+    let user_id = sqlx::query_scalar!(r#"SELECT id FROM users WHERE email = $1::citext"#, email)
+        .fetch_one(&pool)
+        .await
+        .expect("user harus tersimpan");
+
+    let roles = rbac::resolve_roles(&pool, user_id, app_core)
+        .await
+        .expect("resolve role");
+
+    assert!(
+        roles.is_empty(),
+        "user biasa tidak boleh punya role: {roles:?}"
+    );
+
+    sqlx::query!(r#"DELETE FROM users WHERE id = $1"#, user_id)
         .execute(&pool)
         .await
         .expect("bersihkan user uji");
