@@ -29,6 +29,9 @@ pub struct NewEvent<'a> {
     pub path: &'a str,
     pub status_code: Option<i16>,
     pub request_id: &'a str,
+    /// Alamat klien; `None` berarti tidak ada info alamat yang bisa dipercaya.
+    pub ip: Option<&'a str>,
+    pub user_agent: &'a str,
     pub metadata: Value,
 }
 
@@ -53,8 +56,8 @@ pub async fn insert(pool: &PgPool, ev: &NewEvent<'_>) -> Result<i64, sqlx::Error
         r#"
         INSERT INTO audit_events
             (app_id, app_slug, actor_type, actor_user_id, action,
-             method, path, status_code, request_id, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::int2, $9, $10)
+             method, path, status_code, request_id, ip, user_agent, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::int2, $9, $10::text::inet, $11, $12)
         RETURNING id
         "#,
         ev.app_id,
@@ -66,6 +69,8 @@ pub async fn insert(pool: &PgPool, ev: &NewEvent<'_>) -> Result<i64, sqlx::Error
         ev.path,
         ev.status_code,
         ev.request_id,
+        ev.ip,
+        ev.user_agent,
         ev.metadata,
     )
     .fetch_one(pool)

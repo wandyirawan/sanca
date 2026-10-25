@@ -177,6 +177,8 @@ async fn audit_insert_dan_filter_app(pool: PgPool) {
                 path: "/api/auth/login",
                 status_code: Some(kode),
                 request_id: "req-uji",
+                ip: None,
+                user_agent: "uji",
                 metadata,
             }
         }

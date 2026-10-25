@@ -73,13 +73,35 @@ const fn authenticated(method: Method, path: &'static str) -> RouteDef {
 }
 
 /// Route terproteksi milik app `core` dengan satu permission wajib.
+///
+/// Tanpa `audit_action`: tidak setiap route perlu meninggalkan jejak, dan
+/// action yang tidak berbentuk `resource.verb` hanya jadi noise di layar audit.
 const fn protected(method: Method, path: &'static str, permission: &'static str) -> RouteDef {
     RouteDef {
         method,
         path,
         access: Access::Permission(permission),
         scope: AppScope::CoreOnly,
-        audit_action: Some(permission),
+        audit_action: None,
+    }
+}
+
+/// Route terproteksi yang juga dicatat middleware audit.
+///
+/// `action` ditulis `resource.verb` huruf kecil supaya kolom aksi di layar
+/// audit terbaca sebagai kalimat kerja, bukan sebagai nama permission.
+const fn protected_audit(
+    method: Method,
+    path: &'static str,
+    permission: &'static str,
+    action: &'static str,
+) -> RouteDef {
+    RouteDef {
+        method,
+        path,
+        access: Access::Permission(permission),
+        scope: AppScope::CoreOnly,
+        audit_action: Some(action),
     }
 }
 
@@ -119,49 +141,81 @@ pub const ROUTES: &[RouteDef] = &[
     // ubah dan kedua aksi tulis menuntut `user:write`. Route form tetap
     // didaftarkan supaya halaman yang dirender tanpa JavaScript pun melewati
     // penegakan yang sama, bukan hanya tombolnya disembunyikan.
-    protected(Method::GET, "/console/users", "user:read"),
-    protected(Method::POST, "/console/users", "user:write"),
+    protected_audit(Method::GET, "/console/users", "user:read", "user.read"),
+    protected_audit(Method::POST, "/console/users", "user:write", "user.create"),
     protected(Method::GET, "/console/users/rows", "user:read"),
     protected(Method::GET, "/console/users/new", "user:write"),
-    protected(Method::GET, "/console/users/{id}", "user:read"),
-    protected(Method::POST, "/console/users/{id}", "user:write"),
+    protected_audit(Method::GET, "/console/users/{id}", "user:read", "user.read"),
+    protected_audit(
+        Method::POST,
+        "/console/users/{id}",
+        "user:write",
+        "user.update",
+    ),
     protected(Method::GET, "/console/users/{id}/edit", "user:write"),
     // Layar aplikasi: daftar dan fragmen baris cukup `app:read`; membuat app dan
     // merotasi secret menuntut `app:write`. Route rotasi didaftarkan sebagai
     // POST tersendiri supaya penegakan tidak bergantung pada tombol yang
     // disembunyikan template.
-    protected(Method::GET, "/console/apps", "app:read"),
+    protected_audit(Method::GET, "/console/apps", "app:read", "app.read"),
     protected(Method::GET, "/console/apps/rows", "app:read"),
     protected(Method::GET, "/console/apps/new", "app:write"),
-    protected(Method::POST, "/console/apps", "app:write"),
-    protected(Method::POST, "/console/apps/{id}/rotate", "app:write"),
+    protected_audit(Method::POST, "/console/apps", "app:write", "app.create"),
+    protected_audit(
+        Method::POST,
+        "/console/apps/{id}/rotate",
+        "app:write",
+        "app.rotate_secret",
+    ),
     // Layar RBAC: matriks role × permission cukup `role:read`; menyimpan izin
     // satu role menuntut `role:write`. Route POST terpisah supaya penegakan
     // tidak bergantung pada tombol yang disembunyikan template.
-    protected(Method::GET, "/console/rbac", "role:read"),
-    protected(
+    protected_audit(Method::GET, "/console/rbac", "role:read", "role.read"),
+    protected_audit(
         Method::POST,
         "/console/rbac/roles/{id}/permissions",
         "role:write",
+        "role.update_permissions",
     ),
     // Jejak audit hanya bisa dibaca, tidak ada route tulis dari console.
-    protected(Method::GET, "/console/audit", "audit:read"),
+    protected_audit(Method::GET, "/console/audit", "audit:read", "audit.read"),
     authenticated(Method::GET, "/api/auth/me"),
-    protected(Method::GET, "/api/roles", "role:read"),
-    protected(Method::POST, "/api/roles", "role:write"),
+    protected_audit(Method::GET, "/api/roles", "role:read", "role.read"),
+    protected_audit(Method::POST, "/api/roles", "role:write", "role.create"),
     protected(Method::GET, "/api/permissions", "role:read"),
     protected(Method::GET, "/api/roles/{id}/permissions", "role:read"),
-    protected(Method::PUT, "/api/roles/{id}/permissions", "role:write"),
-    protected(Method::DELETE, "/api/roles/{id}", "role:write"),
-    protected(Method::GET, "/api/users", "user:read"),
-    protected(Method::POST, "/api/users", "user:write"),
-    protected(Method::GET, "/api/users/{id}", "user:read"),
-    protected(Method::PATCH, "/api/users/{id}", "user:write"),
-    protected(Method::POST, "/api/users/{id}/roles", "role:write"),
-    protected(
+    protected_audit(
+        Method::PUT,
+        "/api/roles/{id}/permissions",
+        "role:write",
+        "role.update_permissions",
+    ),
+    protected_audit(
+        Method::DELETE,
+        "/api/roles/{id}",
+        "role:write",
+        "role.delete",
+    ),
+    protected_audit(Method::GET, "/api/users", "user:read", "user.read"),
+    protected_audit(Method::POST, "/api/users", "user:write", "user.create"),
+    protected_audit(Method::GET, "/api/users/{id}", "user:read", "user.read"),
+    protected_audit(
+        Method::PATCH,
+        "/api/users/{id}",
+        "user:write",
+        "user.update",
+    ),
+    protected_audit(
+        Method::POST,
+        "/api/users/{id}/roles",
+        "role:write",
+        "role.assign",
+    ),
+    protected_audit(
         Method::DELETE,
         "/api/users/{id}/roles/{role_id}",
         "role:write",
+        "role.revoke",
     ),
 ];
 

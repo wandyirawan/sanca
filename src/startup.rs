@@ -41,6 +41,13 @@ pub fn build_app(state: AppState) -> Router {
             state.clone(),
             crate::rbac::enforce::enforce,
         ))
+        // Audit dipasang setelah enforce (jadi berjalan lebih dulu) supaya
+        // penolakan 403 dari enforce tetap tercatat, tetapi setelah
+        // session_gate supaya cookie console sudah menjadi header Authorization.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::audit::audit,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::console::session_gate,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO audit_events\n            (app_id, app_slug, actor_type, actor_user_id, action,\n             method, path, status_code, request_id, metadata)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::int2, $9, $10)\n        RETURNING id\n        ",
+  "query": "\n        INSERT INTO audit_events\n            (app_id, app_slug, actor_type, actor_user_id, action,\n             method, path, status_code, request_id, ip, user_agent, metadata)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::int2, $9, $10::text::inet, $11, $12)\n        RETURNING id\n        ",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,8 @@
         "Text",
         "Int2",
         "Text",
+        "Text",
+        "Text",
         "Jsonb"
       ]
     },
@@ -44,5 +46,5 @@
       false
     ]
   },
-  "hash": "4038fc31ddc03f66bb9d63945411dc216d3a3cdf7cd4d696294f275dd9245b82"
+  "hash": "c2a7eedc13fc587d972f0d77b6d8e0c50e6e08c9b8f631365444702f4bfec2bf"
 }

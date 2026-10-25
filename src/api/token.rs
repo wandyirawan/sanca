@@ -37,6 +37,7 @@ use crate::auth::secret::verify_client_secret;
 use crate::db::apps::{self, App, AppKind};
 use crate::db::rbac as db_rbac;
 use crate::db::users::{self, User, UserStatus};
+use crate::domain::audit::{self, ActorType, Event};
 use crate::domain::oauth::{self, GrantError};
 use crate::middleware::ratelimit::client_ip;
 use crate::state::AppState;
@@ -123,6 +124,13 @@ async fn client_credentials(state: &AppState, headers: &HeaderMap) -> Response {
     // membatalkan token yang sudah sah ditandatangani.
     touch(state, credential.id).await;
 
+    // Route token publik bagi middleware, jadi penerbitan token dicatat eksplisit.
+    let event = Event::new(&app.slug, "token.client_credentials", ActorType::Service)
+        .app(Some(app.id))
+        .request("POST", "/api/oauth/token", headers)
+        .status(200);
+    audit::record(&state.pool, event);
+
     token_response(access_token, app.access_ttl_secs as i64, &[], None)
 }
 
@@ -180,6 +188,13 @@ async fn authorization_code(state: &AppState, headers: &HeaderMap, params: &Para
         return oauth_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error");
     };
 
+    let event = Event::new(&app.slug, "token.authorization_code", ActorType::User)
+        .actor(Some(user.id))
+        .app(Some(app.id))
+        .request("POST", "/api/oauth/token", headers)
+        .status(200);
+    audit::record(&state.pool, event);
+
     token_response(
         access_token,
         app.access_ttl_secs as i64,
@@ -234,6 +249,13 @@ async fn refresh_grant(state: &AppState, headers: &HeaderMap, params: &Params) -
     let Some(access_token) = sign_token(state, &claims) else {
         return oauth_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error");
     };
+
+    let event = Event::new(&app.slug, "token.refresh_token", ActorType::User)
+        .actor(Some(user.id))
+        .app(Some(app.id))
+        .request("POST", "/api/oauth/token", headers)
+        .status(200);
+    audit::record(&state.pool, event);
 
     token_response(
         access_token,

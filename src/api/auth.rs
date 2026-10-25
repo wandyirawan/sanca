@@ -19,6 +19,7 @@ use crate::auth::password::verify_password;
 use crate::db::apps::{self, App};
 use crate::db::users::{self, User, UserStatus};
 use crate::db::{rbac, sessions};
+use crate::domain::audit::{self, ActorType, Event};
 use crate::error::AppError;
 use crate::middleware::ratelimit::{PeerAddr, client_ip};
 use crate::state::AppState;
@@ -73,6 +74,7 @@ async fn login(
 
     let Some((user, app)) = check_credentials(&state, &body).await? else {
         state.login_limiter.record_failure(&body.email, &ip);
+        record_login_failed(&state, &body, &headers);
         return Err(AppError::Unauthorized);
     };
 
@@ -80,6 +82,15 @@ async fn login(
 
     let (session_id, refresh_token) = start_session(&state, user.id, &app, &headers, &ip).await?;
     let (access_token, expires_in) = issue_access(&state, &user, &app, session_id).await?;
+
+    // Login berhasil dicatat eksplisit: route ini publik, jadi middleware audit
+    // tidak punya klaim token untuk dibaca saat request masuk.
+    let event = Event::new(&app.slug, "auth.login", ActorType::User)
+        .actor(Some(user.id))
+        .app(Some(app.id))
+        .request("POST", "/api/auth/login", &headers)
+        .status(200);
+    audit::record(&state.pool, event);
 
     Ok(Json(TokenResponse {
         access_token,
@@ -161,6 +172,14 @@ async fn refresh(
     let (session_id, refresh_token) = start_session(&state, user.id, &app, &headers, &ip).await?;
     let (access_token, expires_in) = issue_access(&state, &user, &app, session_id).await?;
 
+    // Rotasi sesi juga publik dari sudut pandang middleware, jadi dicatat di sini.
+    let event = Event::new(&app.slug, "auth.refresh", ActorType::User)
+        .actor(Some(user.id))
+        .app(Some(app.id))
+        .request("POST", "/api/auth/refresh", &headers)
+        .status(200);
+    audit::record(&state.pool, event);
+
     Ok(Json(TokenResponse {
         access_token,
         refresh_token,
@@ -173,15 +192,38 @@ async fn refresh(
 /// tidak dikenal, supaya endpoint ini tidak bisa dipakai menebak token valid.
 async fn logout(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RefreshRequest>,
 ) -> Result<StatusCode, AppError> {
     let hash = hash_refresh_token(&body.refresh_token);
 
     if let Some(session) = sessions::by_refresh_hash(&state.pool, &hash).await? {
         sessions::revoke(&state.pool, session.id).await?;
+
+        // Slug app dibaca dari sesi yang dicabut supaya jejaknya terbaca;
+        // kegagalan membaca app tidak boleh membatalkan logout.
+        if let Ok(Some(app)) = apps::by_id(&state.pool, session.app_id).await {
+            let event = Event::new(&app.slug, "auth.logout", ActorType::User)
+                .actor(Some(session.user_id))
+                .app(Some(app.id))
+                .request("POST", "/api/auth/logout", &headers)
+                .status(204);
+            audit::record(&state.pool, event);
+        }
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Catat login yang ditolak. Yang disimpan hanya alasan; email, password, dan
+/// body request tidak pernah ikut ke metadata.
+fn record_login_failed(state: &AppState, body: &LoginRequest, headers: &HeaderMap) {
+    let event = Event::new(&body.app_slug, "auth.login_failed", ActorType::User)
+        .request("POST", "/api/auth/login", headers)
+        .status(401)
+        .metadata(serde_json::json!({ "reason": "invalid_credentials" }));
+
+    audit::record(&state.pool, event);
 }
 
 /// Buat sesi baru dan kembalikan (id sesi, refresh token mentah).
