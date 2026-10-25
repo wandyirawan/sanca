@@ -1,5 +1,6 @@
 use std::io::{IsTerminal, Read};
 
+use crate::auth::keys;
 use crate::auth::password::hash_password;
 use crate::config::Config;
 use crate::db::apps::{self, AppKind};
@@ -30,6 +31,27 @@ pub enum Command {
     App {
         #[command(subcommand)]
         command: AppCommand,
+    },
+    /// Operasi pada signing key: menerbitkan kunci baru dan memensiunkan yang lama.
+    Key {
+        #[command(subcommand)]
+        command: KeyCommand,
+    },
+}
+
+/// Subcommand signing key.
+#[derive(Subcommand, Debug)]
+pub enum KeyCommand {
+    /// Buat kunci signing baru. Kunci lama sengaja tetap hidup supaya token
+    /// yang sudah terbit tidak langsung mati.
+    Rotate,
+    /// Pensiunkan satu kunci: hilang dari JWKS dan tokennya ditolak.
+    ///
+    /// File `<kid>.pem` sengaja tidak dihapus; operator yang menghapusnya
+    /// sendiri setelah yakin tidak ada lagi token yang perlu diverifikasi.
+    Retire {
+        /// `kid` kunci yang dipensiunkan; sama dengan nama file di SANCA_KEY_DIR.
+        kid: String,
     },
 }
 
@@ -210,6 +232,56 @@ pub async fn run_app_command(command: &AppCommand) -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// Jalankan subcommand signing key.
+///
+/// Rotate dan retire sama-sama mengubah isi direktori kunci dan tabel
+/// `signing_keys`, tetapi server yang sedang jalan masih memakai keyset yang
+/// dimuat saat start. Karena itu keduanya diakhiri pengingat untuk restart.
+pub async fn run_key_command(command: &KeyCommand) -> anyhow::Result<()> {
+    let config = Config::from_env().map_err(anyhow::Error::msg)?;
+    let pool = connect().await?;
+
+    match command {
+        KeyCommand::Rotate => {
+            let key = keys::rotate(&pool, &config).await.map_err(key_error)?;
+
+            println!("kunci baru: {}", key.kid);
+            if let Some(dir) = &config.sanca_key_dir {
+                println!(
+                    "file private: {}",
+                    dir.join(format!("{}.pem", key.kid)).display()
+                );
+            }
+            println!(
+                "PERINGATAN: kunci lama masih dipublikasikan di JWKS dan masih bisa \
+                 memverifikasi token sampai kamu menjalankan `sanca key retire <kid lama>`. \
+                 Restart server supaya kunci baru dipakai menandatangani token."
+            );
+            Ok(())
+        }
+        KeyCommand::Retire { kid } => {
+            let hasil = keys::retire(&pool, &config, kid).await.map_err(key_error)?;
+
+            println!("kunci dipensiunkan: {}", hasil.kid);
+            println!("baris signing_keys diperbarui: {}", hasil.rows);
+            println!(
+                "file private TIDAK dihapus; kalau kunci ini tidak dipakai lagi, hapus sendiri \
+                 {}.pem dari SANCA_KEY_DIR",
+                hasil.kid
+            );
+            println!(
+                "Restart server supaya JWKS tidak lagi memuat kid ini dan token lamanya ditolak."
+            );
+            Ok(())
+        }
+    }
+}
+
+/// Kegagalan operasi kunci diterjemahkan apa adanya; pesannya sudah lengkap.
+fn key_error(err: keys::KeyError) -> anyhow::Error {
+    anyhow::anyhow!("{err}")
 }
 
 /// Pesan CLI untuk kegagalan domain. Variant `AppError` tidak mengimplementasi

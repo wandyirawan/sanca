@@ -16,5 +16,9 @@ async fn main() -> anyhow::Result<()> {
         return sanca::cli::run_app_command(command).await;
     }
 
+    if let Some(Command::Key { command }) = &cli.command {
+        return sanca::cli::run_key_command(command).await;
+    }
+
     sanca::startup::run(cli).await
 }

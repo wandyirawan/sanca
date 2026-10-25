@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use sanca::auth::jwt::{self, Claims};
-use sanca::auth::keys::SigningKey;
+use sanca::auth::keys::{KeySet, SigningKey};
 use sanca::auth::password::{hash_password, verify_password};
 use sanca::config::{Config, Environment, LogFormat};
 use sanca::db::rbac;
@@ -144,7 +144,8 @@ fn pepper_berbeda_tidak_bisa_verifikasi() {
 #[test]
 fn access_token_bisa_ditandatangani_dan_diverifikasi() {
     let config = config_with(None);
-    let keys = SigningKey::load_or_generate(&config).expect("key");
+    // Verifikasi selalu lewat KeySet; satu kunci tunggal dibungkus jadi keyset.
+    let keys = KeySet::from(SigningKey::load_or_generate(&config).expect("key"));
     let claims = claims(&config.iam_public_url, "core", 900);
 
     let token = jwt::sign_access(&keys, &claims).expect("sign");
@@ -156,7 +157,8 @@ fn access_token_bisa_ditandatangani_dan_diverifikasi() {
 #[test]
 fn audience_salah_ditolak() {
     let config = config_with(None);
-    let keys = SigningKey::load_or_generate(&config).expect("key");
+    // Verifikasi selalu lewat KeySet; satu kunci tunggal dibungkus jadi keyset.
+    let keys = KeySet::from(SigningKey::load_or_generate(&config).expect("key"));
     let token =
         jwt::sign_access(&keys, &claims(&config.iam_public_url, "salak", 900)).expect("sign");
 
@@ -169,7 +171,8 @@ fn audience_salah_ditolak() {
 #[test]
 fn token_kedaluwarsa_ditolak() {
     let config = config_with(None);
-    let keys = SigningKey::load_or_generate(&config).expect("key");
+    // Verifikasi selalu lewat KeySet; satu kunci tunggal dibungkus jadi keyset.
+    let keys = KeySet::from(SigningKey::load_or_generate(&config).expect("key"));
     let token =
         jwt::sign_access(&keys, &claims(&config.iam_public_url, "core", -3600)).expect("sign");
 

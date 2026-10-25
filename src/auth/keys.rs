@@ -4,6 +4,7 @@
 //! dipilih (§14.7). Private key tidak pernah masuk database; yang disimpan di
 //! tabel `signing_keys` hanya public key dalam bentuk PEM.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,6 +29,14 @@ pub enum KeyError {
     Io(String),
     /// `openssl` tidak tersedia padahal dibutuhkan untuk generate key di dev.
     GeneratorUnavailable(String),
+    /// Query tabel `signing_keys` gagal.
+    Db(String),
+    /// Kunci ini sedang dipakai menandatangani token, jadi tidak boleh pensiun.
+    Active(String),
+    /// Kunci ini sudah dipensiunkan sebelumnya.
+    AlreadyRetired(String),
+    /// Kid tidak dikenal, baik di database maupun di direktori kunci.
+    Unknown(String),
 }
 
 impl fmt::Display for KeyError {
@@ -41,6 +50,14 @@ impl fmt::Display for KeyError {
             KeyError::InvalidPem(msg) => write!(f, "PEM signing key tidak valid: {msg}"),
             KeyError::Io(msg) => write!(f, "gagal mengakses file signing key: {msg}"),
             KeyError::GeneratorUnavailable(msg) => write!(f, "gagal membuat signing key: {msg}"),
+            KeyError::Db(msg) => write!(f, "gagal mengakses tabel signing_keys: {msg}"),
+            KeyError::Active(kid) => write!(
+                f,
+                "tidak bisa mempensiunkan kunci aktif {kid}; rotate dulu, lalu pensiunkan \
+                 kunci yang sudah tidak menandatangani token"
+            ),
+            KeyError::AlreadyRetired(kid) => write!(f, "kunci {kid} sudah dipensiunkan"),
+            KeyError::Unknown(kid) => write!(f, "kunci {kid} tidak dikenal"),
         }
     }
 }
@@ -173,11 +190,385 @@ impl SigningKey {
         })
     }
 
-    /// Payload `/.well-known/jwks.json`. Untuk sekarang hanya key aktif ini;
-    /// key yang sudah dipensiunkan tidak ikut dipublikasikan.
+    /// Payload `/.well-known/jwks.json`. Versi satu kunci ini dipakai jalur
+    /// yang memang hanya punya satu key; `KeySet` mempublikasikan semuanya.
     pub fn jwks_json(&self) -> Value {
         json!({ "keys": [self.jwk()] })
     }
+}
+
+/// Kumpulan kunci yang masih hidup.
+///
+/// Satu kunci aktif menandatangani token baru; semua kunci lain yang belum
+/// dipensiunkan tetap bisa memverifikasi token lama dan tetap dipublikasikan di
+/// JWKS. Inilah yang membuat rotasi kunci tidak memutus sesi yang sedang jalan.
+pub struct KeySet {
+    active: SigningKey,
+    /// Decoding key per `kid`, termasuk kunci aktif.
+    verifiers: HashMap<String, DecodingKey>,
+    /// JWKS semua kunci hidup, kunci aktif di urutan pertama.
+    jwks: Vec<Value>,
+}
+
+impl fmt::Debug for KeySet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KeySet")
+            .field("active", &self.active)
+            .field("kunci", &self.verifiers.len())
+            .finish()
+    }
+}
+
+impl KeySet {
+    /// Keyset minimal dari satu kunci; dipakai test dan jalur yang memang
+    /// hanya punya satu key (misalnya `JWT_PRIVATE_KEY_PEM`).
+    pub fn from_signing_key(active: SigningKey) -> Self {
+        let mut verifiers = HashMap::new();
+        verifiers.insert(active.kid.clone(), active.decoding_key.clone());
+        let jwks = vec![active.jwk()];
+
+        Self {
+            active,
+            verifiers,
+            jwks,
+        }
+    }
+
+    /// Muat semua kunci hidup.
+    ///
+    /// `live` adalah pasangan `(kid, public_pem)` dari tabel `signing_keys` yang
+    /// `retired_at IS NULL`, terbaru dulu. `retired` berisi `kid` yang sudah
+    /// dipensiunkan: filenya boleh saja masih ada di disk (retire sengaja tidak
+    /// menghapus file), tetapi kunci itu tidak boleh ikut JWKS maupun dipakai
+    /// memverifikasi token.
+    ///
+    /// Material private diambil dari file `<kid>.pem` kalau ada; kalau tidak,
+    /// kunci tetap bisa memverifikasi lewat `public_pem` di database. Bila
+    /// `live` kosong (database belum diisi, misalnya di unit test), semua file
+    /// di SANCA_KEY_DIR dianggap hidup kecuali yang ada di `retired`.
+    pub fn load(
+        config: &Config,
+        live: &[(String, String)],
+        retired: &[String],
+    ) -> Result<Self, KeyError> {
+        let pensiun: HashSet<&str> = retired.iter().map(String::as_str).collect();
+        let dari_dir = private_keys_in_dir(config)?;
+
+        // Kunci aktif = baris hidup terbaru yang file private-nya ada, supaya
+        // hasil `sanca key rotate` langsung terpakai setelah server restart.
+        let kid_aktif = active_kid(config, live);
+
+        // `load_or_generate` memakai `jwt_kid` sebagai nama file, jadi kunci
+        // aktif cukup ditunjuk lewat salinan config.
+        let mut config_aktif = config.clone();
+        config_aktif.jwt_kid = kid_aktif;
+        let active = SigningKey::load_or_generate(&config_aktif)?;
+
+        let mut keyset = Self::from_signing_key(active);
+
+        // (a) Kunci hidup menurut database adalah daftar resminya.
+        for (kid, public_pem) in live {
+            if pensiun.contains(kid.as_str()) || keyset.verifiers.contains_key(kid) {
+                continue;
+            }
+
+            match dari_dir.iter().find(|(k, _)| k == kid) {
+                Some((_, key)) => {
+                    let jwk = key.jwk();
+                    keyset.insert(kid.clone(), key.decoding_key.clone(), jwk);
+                }
+                None => {
+                    let (decoding_key, jwk) = verifier_from_public_pem(kid, public_pem)?;
+                    keyset.insert(kid.clone(), decoding_key, jwk);
+                }
+            }
+        }
+
+        // (b) Jaring pengaman untuk jalur tanpa database (test, bootstrap awal):
+        // setiap file yang bukan milik kunci pensiun dianggap hidup.
+        if live.is_empty() {
+            for (kid, key) in dari_dir {
+                if pensiun.contains(kid.as_str()) || keyset.verifiers.contains_key(&kid) {
+                    continue;
+                }
+                let jwk = key.jwk();
+                keyset.insert(kid, key.decoding_key, jwk);
+            }
+        }
+
+        Ok(keyset)
+    }
+
+    /// Kunci yang dipakai menandatangani token baru.
+    pub fn signing_key(&self) -> &SigningKey {
+        &self.active
+    }
+
+    /// `kid` kunci aktif.
+    pub fn kid(&self) -> &str {
+        &self.active.kid
+    }
+
+    /// Decoding key untuk `kid`, atau `None` kalau kunci itu sudah tidak hidup.
+    pub fn verifier(&self, kid: &str) -> Option<&DecodingKey> {
+        self.verifiers.get(kid)
+    }
+
+    /// Payload `/.well-known/jwks.json` dari semua kunci hidup.
+    pub fn jwks_json(&self) -> Value {
+        json!({ "keys": self.jwks })
+    }
+
+    fn insert(&mut self, kid: String, decoding_key: DecodingKey, jwk: Value) {
+        self.verifiers.insert(kid, decoding_key);
+        self.jwks.push(jwk);
+    }
+}
+
+impl From<SigningKey> for KeySet {
+    fn from(key: SigningKey) -> Self {
+        Self::from_signing_key(key)
+    }
+}
+
+/// Hasil `sanca key retire`, untuk dicetak CLI.
+#[derive(Debug)]
+pub struct RetiredKey {
+    pub kid: String,
+    /// Jumlah baris `signing_keys` yang berubah.
+    pub rows: u64,
+}
+
+/// Siapkan keyset saat startup.
+///
+/// Tabel `signing_keys` adalah satu-satunya sumber kebenaran status kunci:
+/// file `*.pem` hanya menyediakan material private. Karena itu setiap kunci
+/// yang punya material private tetapi belum punya baris DB didaftarkan lebih
+/// dulu (`ON CONFLICT DO NOTHING`), sehingga `sanca key retire` tidak pernah
+/// menjawab "kunci tidak dikenal" untuk kunci yang benar-benar ada.
+pub async fn bootstrap(pool: &sqlx::PgPool, config: &Config) -> Result<KeySet, KeyError> {
+    for (kid, key) in private_keys_in_dir(config)? {
+        crate::db::keys::backfill(pool, &kid, &key.public_pem)
+            .await
+            .map_err(db_error)?;
+    }
+
+    let live = crate::db::keys::list_active(pool).await.map_err(db_error)?;
+    let live: Vec<(String, String)> = live
+        .into_iter()
+        .map(|row| (row.kid, row.public_pem))
+        .collect();
+    let pensiun = crate::db::keys::list_retired(pool)
+        .await
+        .map_err(db_error)?;
+
+    let keyset = KeySet::load(config, &live, &pensiun)?;
+
+    // Kunci aktif bisa lahir dari generate dev atau dari env, jadi barisnya
+    // didaftarkan setelah keyset terbentuk.
+    crate::db::keys::backfill(pool, keyset.kid(), &keyset.signing_key().public_pem)
+        .await
+        .map_err(db_error)?;
+    crate::db::keys::mark_active(pool, keyset.kid())
+        .await
+        .map_err(db_error)?;
+
+    Ok(keyset)
+}
+
+/// Buat kunci signing baru, simpan file private-nya, dan daftarkan public key
+/// ke tabel `signing_keys`.
+///
+/// Kunci lama sengaja tidak dipensiunkan di sini: token yang sudah terbit harus
+/// tetap valid sampai operator memanggil `retire`.
+pub async fn rotate(pool: &sqlx::PgPool, config: &Config) -> Result<SigningKey, KeyError> {
+    let Some(dir) = &config.sanca_key_dir else {
+        return Err(KeyError::Io(
+            "SANCA_KEY_DIR wajib diisi supaya kunci baru punya tempat tinggal".into(),
+        ));
+    };
+
+    let kid = kid_baru(&config.jwt_kid);
+    let path = key_path(dir, &kid);
+    if path.exists() {
+        return Err(KeyError::Io(format!(
+            "kunci {kid} sudah ada; tunggu satu detik lalu jalankan lagi"
+        )));
+    }
+
+    let pem = generate_private_pem()?;
+    write_private_pem(dir, &path, &pem)?;
+    let key = SigningKey::from_pem(&kid, &pem, false)?;
+
+    if let Err(err) = crate::db::keys::insert(pool, &kid, &key.public_pem).await {
+        // Jangan tinggalkan file tanpa baris DB: itu kunci hantu yang tetap
+        // masuk JWKS tapi tidak bisa dilacak asalnya.
+        let _ = fs::remove_file(&path);
+        return Err(KeyError::Db(err.to_string()));
+    }
+
+    Ok(key)
+}
+
+/// Pensiunkan satu kunci.
+///
+/// Status pensiun hanya dicatat di database (`is_active = false`,
+/// `retired_at = now()`). File private-nya sengaja TIDAK dihapus: penghapusan
+/// file adalah tugas operator, dan menghapusnya otomatis pernah membuat kunci
+/// yang masih dipakai memverifikasi token hilang dari disk.
+///
+/// Kunci yang sedang aktif (yang menandatangani token baru) ditolak, karena
+/// server akan kehilangan penanda tangan sampai ada kunci pengganti.
+pub async fn retire(
+    pool: &sqlx::PgPool,
+    config: &Config,
+    kid: &str,
+) -> Result<RetiredKey, KeyError> {
+    let live = crate::db::keys::list_active(pool).await.map_err(db_error)?;
+    let live: Vec<(String, String)> = live
+        .into_iter()
+        .map(|row| (row.kid, row.public_pem))
+        .collect();
+
+    // Aturan kunci aktif harus sama persis dengan yang dipakai `KeySet::load`,
+    // supaya CLI dan server tidak pernah berbeda pendapat.
+    if active_kid(config, &live) == kid {
+        return Err(KeyError::Active(kid.to_string()));
+    }
+
+    if !live.iter().any(|(row_kid, _)| row_kid == kid) {
+        return if crate::db::keys::exists(pool, kid).await.map_err(db_error)? {
+            Err(KeyError::AlreadyRetired(kid.to_string()))
+        } else {
+            Err(KeyError::Unknown(kid.to_string()))
+        };
+    }
+
+    let rows = crate::db::keys::retire(pool, kid).await.map_err(db_error)?;
+
+    if rows == 0 {
+        return Err(KeyError::Unknown(kid.to_string()));
+    }
+
+    Ok(RetiredKey {
+        kid: kid.to_string(),
+        rows,
+    })
+}
+
+/// `kid` kunci aktif: baris hidup terbaru yang file private-nya ada.
+///
+/// Urutan baris (terbaru dulu) datang dari `signing_keys.created_at`, jadi
+/// kunci hasil `rotate` otomatis menjadi penanda tangan setelah restart.
+/// Kalau tidak ada baris yang cocok, jatuh ke `JWT_KID`; pemanggil yang
+/// memutuskan generate kunci baru (hanya di dev).
+fn active_kid(config: &Config, live: &[(String, String)]) -> String {
+    if config.jwt_private_key_pem.is_some() || config.jwt_private_key_path.is_some() {
+        return config.jwt_kid.clone();
+    }
+
+    if let Some(dir) = &config.sanca_key_dir
+        && let Some((kid, _)) = live.iter().find(|(kid, _)| key_path(dir, kid).is_file())
+    {
+        return kid.clone();
+    }
+
+    config.jwt_kid.clone()
+}
+
+/// Terjemahkan kegagalan query `signing_keys` menjadi `KeyError`.
+fn db_error(err: sqlx::Error) -> KeyError {
+    KeyError::Db(err.to_string())
+}
+
+/// Semua private key di direktori kunci, diurutkan menurut nama file supaya
+/// urutan JWKS stabil antar restart. Kunci dari env tidak punya file, jadi
+/// tidak ikut di sini.
+fn private_keys_in_dir(config: &Config) -> Result<Vec<(String, SigningKey)>, KeyError> {
+    let Some(dir) = &config.sanca_key_dir else {
+        return Ok(Vec::new());
+    };
+    let dir = dir.as_path();
+
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(KeyError::Io(format!("{}: {err}", dir.display()))),
+    };
+
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|e| KeyError::Io(format!("{}: {e}", dir.display())))?
+            .path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("pem") {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+
+    let mut keys = Vec::with_capacity(paths.len());
+    for path in paths {
+        let Some(kid) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let pem = fs::read(&path).map_err(|e| KeyError::Io(format!("{}: {e}", path.display())))?;
+        keys.push((kid.to_string(), SigningKey::from_pem(kid, &pem, false)?));
+    }
+
+    Ok(keys)
+}
+
+/// Decoding key dan JWK dari public key PEM (kolom `signing_keys.public_pem`).
+fn verifier_from_public_pem(kid: &str, public_pem: &str) -> Result<(DecodingKey, Value), KeyError> {
+    let decoding_key = DecodingKey::from_rsa_pem(public_pem.as_bytes())
+        .map_err(|e| KeyError::InvalidPem(format!("{kid}: {e}")))?;
+
+    let jwk = Jwk::from_decoding_key(&decoding_key, Some(Algorithm::RS256))
+        .map_err(|e| KeyError::InvalidPem(format!("{kid}: {e}")))?;
+    let AlgorithmParameters::RSA(rsa) = jwk.algorithm else {
+        return Err(KeyError::InvalidPem(format!("{kid}: bukan kunci RSA")));
+    };
+
+    Ok((
+        decoding_key,
+        json!({
+            "kty": "RSA",
+            "use": "sig",
+            "alg": "RS256",
+            "kid": kid,
+            "n": rsa.n,
+            "e": rsa.e,
+        }),
+    ))
+}
+
+/// `kid` kunci baru: `<JWT_KID>-<YYYYMMDD-HHMMSS>`, huruf kecil, hanya
+/// `[a-z0-9-]`.
+fn kid_baru(base: &str) -> String {
+    let now = time::OffsetDateTime::now_utc();
+    let base: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let base = base.trim_matches('-');
+    let base = if base.is_empty() { "sanca" } else { base };
+
+    format!(
+        "{base}-{:04}{:02}{:02}-{:02}{:02}{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    )
 }
 
 /// Path file private key untuk satu `kid`.

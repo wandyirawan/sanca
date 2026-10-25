@@ -334,7 +334,7 @@ async fn refresh_merotasi_token_dan_logout_mencabut_sesi(pool: PgPool) {
 #[sqlx::test]
 async fn jwks_publik_memuat_kunci_aktif(pool: PgPool) {
     let state = test_state(pool);
-    let kid = state.signing.kid.clone();
+    let kid = state.signing.kid().to_string();
     let app = build_app(state);
 
     let (status, body, headers) = send(

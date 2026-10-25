@@ -9,7 +9,6 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::trace::TraceLayer;
 
 use crate::api;
-use crate::auth::keys::SigningKey;
 use crate::cli::Cli;
 use crate::config::Config;
 use crate::state::AppState;
@@ -102,7 +101,13 @@ async fn build_state(config: &Config) -> anyhow::Result<AppState> {
         .await
         .context("gagal terhubung ke database")?;
 
-    let signing = SigningKey::load_or_generate(config).context("gagal menyiapkan signing key")?;
+    // Tabel signing_keys adalah sumber kebenaran status kunci: startup
+    // mem-backfill baris untuk setiap file <kid>.pem, lalu memuat semua kunci
+    // hidup. Satu kunci menandatangani token baru, sisanya tetap memverifikasi
+    // token lama dan ikut di JWKS.
+    let signing = crate::auth::keys::bootstrap(&pool, config)
+        .await
+        .context("gagal menyiapkan signing key")?;
 
     Ok(AppState::new(pool, config.clone(), signing))
 }

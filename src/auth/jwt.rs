@@ -7,7 +7,7 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::auth::keys::SigningKey;
+use crate::auth::keys::KeySet;
 use crate::config::Config;
 
 /// Klaim access token. Nama field sengaja pendek karena ikut di setiap request.
@@ -59,36 +59,37 @@ impl std::error::Error for JwtError {}
 
 /// Tandatangani access token dengan key aktif. `kid` selalu ikut di header
 /// supaya verifier downstream bisa memilih kunci dari JWKS.
-pub fn sign_access(keys: &SigningKey, claims: &Claims) -> Result<String, JwtError> {
+pub fn sign_access(keys: &KeySet, claims: &Claims) -> Result<String, JwtError> {
+    let key = keys.signing_key();
     let mut header = Header::new(Algorithm::RS256);
-    header.kid = Some(keys.kid.clone());
+    header.kid = Some(key.kid.clone());
 
-    let (encoding_key, _) = keys.key_pair();
+    let (encoding_key, _) = key.key_pair();
     encode(&header, claims, encoding_key).map_err(|_| JwtError::Invalid)
 }
 
 /// Verifikasi access token untuk satu app (`expected_aud` = `app.slug`).
 ///
 /// `iss` wajib sama dengan `IAM_PUBLIC_URL`, `aud` wajib sama dengan app yang
-/// diakses, dan `exp` wajib belum lewat. `kid` asing ditolak lebih dulu, sebelum
-/// signature dihitung.
+/// diakses, dan `exp` wajib belum lewat. Kunci dipilih dari `kid` di header,
+/// bukan selalu kunci aktif: token yang ditandatangani kunci lama tetap sah
+/// selama kunci itu masih hidup di `KeySet`. `kid` asing ditolak lebih dulu,
+/// sebelum signature dihitung.
 pub fn verify_access(
     config: &Config,
-    keys: &SigningKey,
+    keys: &KeySet,
     token: &str,
     expected_aud: &str,
 ) -> Result<Claims, JwtError> {
     let header = decode_header(token).map_err(|_| JwtError::Invalid)?;
-    if header.kid.as_deref() != Some(keys.kid.as_str()) {
-        return Err(JwtError::UnknownKid);
-    }
+    let kid = header.kid.ok_or(JwtError::UnknownKid)?;
+    let decoding_key = keys.verifier(&kid).ok_or(JwtError::UnknownKid)?;
 
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_audience(&[expected_aud]);
     validation.set_issuer(&[config.iam_public_url.as_str()]);
     validation.set_required_spec_claims(&["exp", "aud", "iss"]);
 
-    let (_, decoding_key) = keys.key_pair();
     let data =
         decode::<Claims>(token, decoding_key, &validation).map_err(|err| match err.kind() {
             ErrorKind::ExpiredSignature => JwtError::Expired,

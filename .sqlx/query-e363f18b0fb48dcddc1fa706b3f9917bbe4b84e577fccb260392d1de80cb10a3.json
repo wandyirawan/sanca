@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT kid\n        FROM signing_keys\n        WHERE retired_at IS NOT NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kid",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "signing_keys",
+            "name": "kid"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e363f18b0fb48dcddc1fa706b3f9917bbe4b84e577fccb260392d1de80cb10a3"
+}

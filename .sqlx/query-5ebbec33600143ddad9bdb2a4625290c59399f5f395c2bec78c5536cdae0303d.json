@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE signing_keys\n        SET is_active = (kid = $1)\n        WHERE retired_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5ebbec33600143ddad9bdb2a4625290c59399f5f395c2bec78c5536cdae0303d"
+}
