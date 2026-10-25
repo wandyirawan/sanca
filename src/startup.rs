@@ -33,9 +33,17 @@ pub fn build_app(state: AppState) -> Router {
 
     Router::new()
         .merge(api::router())
+        .merge(crate::console::router())
+        // session_gate ditambahkan setelah enforce, jadi ia berjalan lebih dulu:
+        // cookie console diubah menjadi header Authorization sebelum registry
+        // memutuskan boleh atau tidak.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::rbac::enforce::enforce,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::console::session_gate,
         ))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())

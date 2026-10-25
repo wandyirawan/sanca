@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod console;
 pub mod health;
 pub mod jwks;
 pub mod me;
@@ -24,4 +25,5 @@ pub fn router() -> Router<AppState> {
         .merge(token::router())
         .merge(rbac::router())
         .merge(users::router())
+        .merge(console::router())
 }

@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+
+{% block title %}Ringkasan · Sanca{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Ringkasan</h1>
+<p class="mt-1 text-sm opacity-70">Halo, {{ user_name }}. Ini isi katalog Sanca saat ini.</p>
+
+<div class="stats stats-vertical mt-6 border border-base-300 bg-base-200 sm:stats-horizontal">
+  <div class="stat">
+    <div class="stat-title text-xs uppercase tracking-wide opacity-70">Pengguna</div>
+    <div class="stat-value font-mono tabular">{{ users_count }}</div>
+    <div class="stat-desc">akun terdaftar</div>
+  </div>
+  <div class="stat">
+    <div class="stat-title text-xs uppercase tracking-wide opacity-70">Aplikasi</div>
+    <div class="stat-value font-mono tabular">{{ apps_count }}</div>
+    <div class="stat-desc">app pemakai Sanca</div>
+  </div>
+  <div class="stat">
+    <div class="stat-title text-xs uppercase tracking-wide opacity-70">Peran</div>
+    <div class="stat-value font-mono tabular">{{ roles_count }}</div>
+    <div class="stat-desc">role di app core</div>
+  </div>
+</div>
+{% endblock %}

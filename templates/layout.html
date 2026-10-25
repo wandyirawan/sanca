@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="tanah-malam">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Sanca{% endblock %}</title>
+  <script>
+    // Set tema sebelum CSS dilukis supaya tidak ada kedipan tema salah.
+    (function () {
+      var pilihan = null;
+      try { pilihan = localStorage.getItem('sanca-tema'); } catch (e) { /* mode privat */ }
+      if (pilihan !== 'tanah-malam' && pilihan !== 'tanah-siang') {
+        pilihan = window.matchMedia('(prefers-color-scheme: light)').matches
+          ? 'tanah-siang'
+          : 'tanah-malam';
+      }
+      document.documentElement.setAttribute('data-theme', pilihan);
+    })();
+  </script>
+  <link rel="stylesheet" href="/assets/vendor/daisyui.css">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/vendor/htmx.min.js" defer></script>
+</head>
+<body class="shell-body">
+  <div class="drawer lg:drawer-open">
+    <input id="nav-drawer" type="checkbox" class="drawer-toggle">
+
+    <div class="drawer-content flex min-h-svh flex-col">
+      <header class="navbar gap-2 border-b border-base-300 bg-base-200 px-4">
+        <div class="flex-none lg:hidden">
+          <label for="nav-drawer" class="btn btn-ghost btn-square" aria-label="Buka menu">
+            <span aria-hidden="true">☰</span>
+          </label>
+        </div>
+        <div class="flex-1">
+          <span class="text-lg font-semibold tracking-tight">Sanca</span>
+          <span class="ml-2 text-xs opacity-60">konsol admin</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="theme-toggle" class="btn btn-ghost btn-sm"
+                  aria-label="Ganti tema terang atau gelap" aria-pressed="true">
+            <span aria-hidden="true">◐</span>
+            <span class="hidden sm:inline">Tema</span>
+          </button>
+          <span class="hidden text-sm opacity-70 sm:inline">{{ user_email }}</span>
+          <form method="post" action="/console/logout">
+            <input type="hidden" name="_csrf" value="{{ csrf }}">
+            <button type="submit" class="btn btn-outline btn-sm">Keluar</button>
+          </form>
+        </div>
+      </header>
+
+      <main class="shell-main flex-1 p-4 lg:p-8">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+
+    <div class="drawer-side z-40">
+      <label for="nav-drawer" class="drawer-overlay" aria-label="Tutup menu"></label>
+      <aside class="shell-sidebar min-h-full w-72 p-4">
+        {% include "partials/nav.html" %}
+      </aside>
+    </div>
+  </div>
+
+  {% include "partials/toast.html" %}
+
+  <script>
+    // Pilihan tema disimpan di localStorage; tanpa pilihan, jatuh ke preferensi OS
+    // yang sudah dibaca skrip di <head>.
+    (function () {
+      var tombol = document.getElementById('theme-toggle');
+      if (!tombol) { return; }
+      var gelap = document.documentElement.getAttribute('data-theme') === 'tanah-malam';
+      tombol.setAttribute('aria-pressed', gelap ? 'true' : 'false');
+
+      tombol.addEventListener('click', function () {
+        var sekarang = document.documentElement.getAttribute('data-theme');
+        var berikut = sekarang === 'tanah-malam' ? 'tanah-siang' : 'tanah-malam';
+        document.documentElement.setAttribute('data-theme', berikut);
+        tombol.setAttribute('aria-pressed', berikut === 'tanah-malam' ? 'true' : 'false');
+        try { localStorage.setItem('sanca-tema', berikut); } catch (e) { /* abaikan */ }
+      });
+    })();
+  </script>
+</body>
+</html>

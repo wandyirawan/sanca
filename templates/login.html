@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="tanah-malam">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Masuk · Sanca</title>
+  <script>
+    // Tema login wajib sama dengan console: satu pilihan, satu skrip.
+    (function () {
+      var pilihan = null;
+      try { pilihan = localStorage.getItem('sanca-tema'); } catch (e) { /* mode privat */ }
+      if (pilihan !== 'tanah-malam' && pilihan !== 'tanah-siang') {
+        pilihan = window.matchMedia('(prefers-color-scheme: light)').matches
+          ? 'tanah-siang'
+          : 'tanah-malam';
+      }
+      document.documentElement.setAttribute('data-theme', pilihan);
+    })();
+  </script>
+  <link rel="stylesheet" href="/assets/vendor/daisyui.css">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="shell-body flex min-h-svh items-center justify-center p-4">
+  <main class="w-full max-w-sm">
+    <div class="mb-6">
+      <h1 class="page-title">Sanca</h1>
+      <p class="text-sm opacity-70">Masuk ke konsol admin.</p>
+    </div>
+
+    {% if let Some(pesan) = error %}
+    <div class="alert alert-error mb-4" role="alert">
+      <span>{{ pesan }}</span>
+    </div>
+    {% endif %}
+
+    <form method="post" action="/console/login" class="flex flex-col gap-4 rounded-box border border-base-300 bg-base-200 p-5">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Email</legend>
+        <input class="input w-full" type="email" name="email" value="{{ email }}"
+               autocomplete="username" required autofocus>
+      </fieldset>
+
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Password</legend>
+        <input class="input w-full" type="password" name="password"
+               autocomplete="current-password" required>
+      </fieldset>
+
+      <button type="submit" class="btn btn-primary mt-2">Masuk</button>
+    </form>
+
+    <p class="mt-4 text-xs opacity-60">
+      Sanca tidak pernah menampilkan apakah sebuah email terdaftar.
+    </p>
+  </main>
+</body>
+</html>

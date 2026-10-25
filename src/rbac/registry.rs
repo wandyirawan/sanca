@@ -100,6 +100,16 @@ pub const ROUTES: &[RouteDef] = &[
     public(Method::POST, "/api/auth/refresh"),
     public(Method::POST, "/api/auth/logout"),
     public(Method::POST, "/api/oauth/token"),
+    // Console: halaman login dan logout tidak butuh sesi. Logout tetap publik
+    // karena satu-satunya bukti yang dipakai adalah cookie refresh; memaksa
+    // access token yang sah di sini akan membuat pengguna dengan token
+    // kedaluwarsa tidak bisa keluar. CSRF tetap divalidasi di handler.
+    public(Method::GET, "/console/login"),
+    public(Method::POST, "/console/login"),
+    public(Method::POST, "/console/logout"),
+    public(Method::GET, "/assets/{*path}"),
+    // Dashboard hanya butuh login; setiap menu di dalamnya diperiksa `can()`.
+    authenticated(Method::GET, "/console"),
     authenticated(Method::GET, "/api/auth/me"),
     protected(Method::GET, "/api/roles", "role:read"),
     protected(Method::POST, "/api/roles", "role:write"),

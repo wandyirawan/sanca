@@ -207,6 +207,11 @@ fn registry_memuat_semua_route_router() {
         (Method::DELETE, "/api/roles/{id}"),
         (Method::POST, "/api/users/{id}/roles"),
         (Method::DELETE, "/api/users/{id}/roles/{role_id}"),
+        (Method::GET, "/console"),
+        (Method::GET, "/console/login"),
+        (Method::POST, "/console/login"),
+        (Method::POST, "/console/logout"),
+        (Method::GET, "/assets/{*path}"),
     ];
 
     for (method, path) in routes {

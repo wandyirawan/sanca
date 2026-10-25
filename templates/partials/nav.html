@@ -1,0 +1,28 @@
+{# Sidebar console. Setiap butir yang butuh izin diperiksa `can()`, yang membaca
+   scope token sesi — bukan hasil query baru, dan bukan keputusan otorisasi. #}
+<nav aria-label="Navigasi utama">
+  <ul class="menu gap-1">
+    <li>
+      <a href="/console" class="menu-active" aria-current="page">Ringkasan</a>
+    </li>
+    {% if can("user:read") %}
+    <li>
+      <span class="menu-disabled" aria-disabled="true">
+        Pengguna <span class="badge badge-ghost badge-sm ml-auto">5B</span>
+      </span>
+    </li>
+    {% endif %}
+    {% if can("role:read") %}
+    <li>
+      <span class="menu-disabled" aria-disabled="true">
+        Peran &amp; izin <span class="badge badge-ghost badge-sm ml-auto">5B</span>
+      </span>
+    </li>
+    {% endif %}
+  </ul>
+</nav>
+
+<div class="mt-6 border-t border-base-300 pt-4">
+  <p class="text-xs opacity-60">Masuk sebagai</p>
+  <p class="truncate text-sm font-medium">{{ user_name }}</p>
+</div>
