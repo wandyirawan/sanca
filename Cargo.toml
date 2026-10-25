@@ -8,7 +8,10 @@ axum = "0.8.9"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
-tower-http = { version = "0.7.1", features = ["trace", "request-id", "limit"] }
+tower-http = { version = "0.7.1", features = ["trace", "request-id", "limit", "compression-gzip"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+askama = "0.16.1"
+rust-embed = "8.13.0"
 clap = { version = "4.6.7", features = ["derive"] }
 anyhow = "1"
 serde = { version = "1.0.229", features = ["derive"] }
