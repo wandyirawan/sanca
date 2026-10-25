@@ -24,9 +24,15 @@ pub struct DashboardPage {
     pub csrf: String,
     pub user_name: String,
     pub user_email: String,
-    pub users_count: i64,
+    /// User berstatus `active`; akun nonaktif tetap dihitung terpisah oleh layar pengguna.
+    pub users_active: i64,
     pub apps_count: i64,
     pub roles_count: i64,
+    pub permissions_count: i64,
+    /// Sesi yang belum dicabut dan belum kedaluwarsa.
+    pub sessions_active: i64,
+    /// Event audit dalam 24 jam terakhir.
+    pub audit_24h: i64,
     pub roles: Vec<String>,
     pub scope: Vec<String>,
 }

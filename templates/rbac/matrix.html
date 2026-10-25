@@ -1,0 +1,117 @@
+{# Matriks role × permission app core. Baris = permission, kolom = role.
+
+   Tiap kolom punya satu form sendiri; checkbox di badan tabel terhubung ke form
+   kolomnya lewat atribut `form`, jadi tidak ada satu form raksasa yang bisa
+   mengirim izin role lain. Tanpa JavaScript halaman ini tetap berfungsi penuh. #}
+{% extends "layout.html" %}
+
+{% block title %}Peran &amp; izin · Sanca{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="page-title">Peran &amp; izin</h1>
+    <p class="mt-1 text-sm opacity-70">
+      Centang izin yang dimiliki tiap role di app core, lalu simpan per kolom.
+      Katalog izin berasal dari registry route; role sistem bersifat beku.
+    </p>
+  </div>
+</div>
+
+{% if let Some(notice) = notice %}
+<div class="toast toast-end" role="status" aria-live="polite">
+  <div class="alert alert-{{ notice.kind }}">{{ notice.text }}</div>
+</div>
+{% endif %}
+
+{% if !data.can_write %}
+<p class="mt-4 rounded-box border border-base-300 bg-base-200 p-3 text-sm opacity-80" role="note">
+  Anda hanya dapat melihat matriks ini. Perubahan izin memerlukan izin
+  <span class="font-mono text-xs">role:write</span>.
+</p>
+{% endif %}
+
+{% if data.any_permission %}
+<div class="mt-4 overflow-x-auto rounded-box border border-base-300">
+  <table class="table table-sm" aria-label="Matriks izin per role di app core">
+    <caption class="sr-only">
+      Matriks permission dan role app core. Setiap kolom role memiliki tombol simpan sendiri.
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Permission</th>
+        {% for role in data.roles %}
+        <th scope="col" class="text-center align-bottom">
+          <span class="block text-sm font-semibold">{{ role.name }}</span>
+          <span class="block font-mono text-xs opacity-60">{{ role.key }}</span>
+          {% if role.is_system %}
+          <span class="badge badge-ghost badge-sm mt-1" title="Role sistem tidak bisa diubah">
+            <span aria-hidden="true">🔒</span> sistem, tidak bisa diubah
+          </span>
+          {% endif %}
+        </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in data.rows %}
+      <tr>
+        <th scope="row" class="font-normal">
+          <span class="block font-mono text-xs">{{ row.key }}</span>
+          <span class="block text-xs opacity-60">{{ row.description }}</span>
+        </th>
+        {% for cell in row.cells %}
+        <td class="text-center">
+          <input id="{{ cell.input_id }}" type="checkbox" class="checkbox checkbox-sm"
+                 name="{{ cell.name }}" value="{{ cell.value }}"
+                 form="form-{{ cell.name }}"
+                 {% if cell.checked %}checked{% endif %}
+                 {% if cell.disabled %}disabled{% endif %}
+                 {% if !cell.title.is_empty() %}title="{{ cell.title }}"{% endif %}>
+          <label for="{{ cell.input_id }}" class="sr-only">{{ cell.label }}</label>
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% if data.can_write %}
+    <tfoot>
+      <tr>
+        <th scope="row" class="text-xs uppercase tracking-wide opacity-60">Simpan</th>
+        {% for role in data.roles %}
+        <td class="text-center">
+          {% if role.is_system %}
+          <span class="text-xs opacity-50">beku</span>
+          {% else %}
+          <button type="submit" form="form-perm_{{ role.id }}" class="btn btn-primary btn-xs">
+            Simpan
+            <span class="sr-only">izin role {{ role.name }}</span>
+          </button>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+</div>
+
+{# Satu form per role. Checkbox dan tombol di atas terhubung lewat atribut
+   `form`; form-nya sendiri hanya membawa token CSRF dan action tujuannya. #}
+<div class="hidden">
+  {% for role in data.roles %}
+  {% if !role.is_system %}
+  <form id="form-perm_{{ role.id }}" method="post"
+        action="/console/rbac/roles/{{ role.id }}/permissions">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+  </form>
+  {% endif %}
+  {% endfor %}
+</div>
+{% else %}
+<div class="mt-6 rounded-box border border-base-300 bg-base-200 p-6 text-sm opacity-80" role="status">
+  Belum ada permission di katalog app core. Katalog diisi dari registry route saat
+  server mulai, jadi jalankan ulang server lalu muat halaman ini lagi.
+</div>
+{% endif %}
+{% endblock %}

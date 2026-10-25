@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT rp.role_id, p.key\n        FROM role_permissions rp\n        JOIN permissions p ON p.id = rp.permission_id\n        JOIN roles r       ON r.id = rp.role_id\n        WHERE r.app_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "role_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "role_permissions",
+            "name": "role_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permissions",
+            "name": "key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "3115455c26a831dcfb6e38222fb3bceef781712957e9ce42cd2ce9087d23cb78"
+}

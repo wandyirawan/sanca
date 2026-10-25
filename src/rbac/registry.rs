@@ -130,6 +130,17 @@ pub const ROUTES: &[RouteDef] = &[
     protected(Method::GET, "/console/apps/new", "app:write"),
     protected(Method::POST, "/console/apps", "app:write"),
     protected(Method::POST, "/console/apps/{id}/rotate", "app:write"),
+    // Layar RBAC: matriks role × permission cukup `role:read`; menyimpan izin
+    // satu role menuntut `role:write`. Route POST terpisah supaya penegakan
+    // tidak bergantung pada tombol yang disembunyikan template.
+    protected(Method::GET, "/console/rbac", "role:read"),
+    protected(
+        Method::POST,
+        "/console/rbac/roles/{id}/permissions",
+        "role:write",
+    ),
+    // Jejak audit hanya bisa dibaca, tidak ada route tulis dari console.
+    protected(Method::GET, "/console/audit", "audit:read"),
     authenticated(Method::GET, "/api/auth/me"),
     protected(Method::GET, "/api/roles", "role:read"),
     protected(Method::POST, "/api/roles", "role:write"),

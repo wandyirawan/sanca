@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT (SELECT count(*) FROM users WHERE status = 'active') AS \"users_active!\",\n               (SELECT count(*) FROM apps) AS \"apps_count!\",\n               (SELECT count(*) FROM roles) AS \"roles_count!\",\n               (SELECT count(*) FROM permissions) AS \"permissions_count!\",\n               (SELECT count(*) FROM sessions\n                WHERE revoked_at IS NULL AND expires_at > now()) AS \"sessions_active!\",\n               (SELECT count(*) FROM audit_events\n                WHERE occurred_at > now() - interval '24 hours') AS \"audit_24h!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "users_active!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "apps_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "roles_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "permissions_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "sessions_active!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "audit_24h!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "7d64b31b3c5c39278c9f121aa98ab3e8609d2336fc28375ac2b14736eb71efef"
+}

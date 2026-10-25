@@ -4,23 +4,80 @@
 
 {% block content %}
 <h1 class="page-title">Ringkasan</h1>
-<p class="mt-1 text-sm opacity-70">Halo, {{ user_name }}. Ini isi katalog Sanca saat ini.</p>
+<p class="mt-1 text-sm opacity-70">
+  Halo, {{ user_name }}. Ini keadaan katalog Sanca saat ini.
+</p>
 
-<div class="stats stats-vertical mt-6 border border-base-300 bg-base-200 sm:stats-horizontal">
-  <div class="stat">
-    <div class="stat-title text-xs uppercase tracking-wide opacity-70">Pengguna</div>
-    <div class="stat-value font-mono tabular">{{ users_count }}</div>
-    <div class="stat-desc">akun terdaftar</div>
+<div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  <div class="rounded-box border border-base-300 bg-base-200 p-4">
+    <p class="text-xs uppercase tracking-wide opacity-70">Pengguna aktif</p>
+    <p class="mt-1 font-mono text-3xl tabular">{{ users_active }}</p>
+    <p class="mt-1 text-xs opacity-60">akun berstatus aktif</p>
   </div>
-  <div class="stat">
-    <div class="stat-title text-xs uppercase tracking-wide opacity-70">Aplikasi</div>
-    <div class="stat-value font-mono tabular">{{ apps_count }}</div>
-    <div class="stat-desc">app pemakai Sanca</div>
+  <div class="rounded-box border border-base-300 bg-base-200 p-4">
+    <p class="text-xs uppercase tracking-wide opacity-70">Aplikasi</p>
+    <p class="mt-1 font-mono text-3xl tabular">{{ apps_count }}</p>
+    <p class="mt-1 text-xs opacity-60">service yang memakai Sanca</p>
   </div>
-  <div class="stat">
-    <div class="stat-title text-xs uppercase tracking-wide opacity-70">Peran</div>
-    <div class="stat-value font-mono tabular">{{ roles_count }}</div>
-    <div class="stat-desc">role di app core</div>
+  <div class="rounded-box border border-base-300 bg-base-200 p-4">
+    <p class="text-xs uppercase tracking-wide opacity-70">Role</p>
+    <p class="mt-1 font-mono text-3xl tabular">{{ roles_count }}</p>
+    <p class="mt-1 text-xs opacity-60">di semua aplikasi</p>
+  </div>
+  <div class="rounded-box border border-base-300 bg-base-200 p-4">
+    <p class="text-xs uppercase tracking-wide opacity-70">Permission</p>
+    <p class="mt-1 font-mono text-3xl tabular">{{ permissions_count }}</p>
+    <p class="mt-1 text-xs opacity-60">izin di katalog app</p>
+  </div>
+  <div class="rounded-box border border-base-300 bg-base-200 p-4">
+    <p class="text-xs uppercase tracking-wide opacity-70">Sesi aktif</p>
+    <p class="mt-1 font-mono text-3xl tabular">{{ sessions_active }}</p>
+    <p class="mt-1 text-xs opacity-60">belum dicabut dan belum kedaluwarsa</p>
+  </div>
+  <div class="rounded-box border border-base-300 bg-base-200 p-4">
+    <p class="text-xs uppercase tracking-wide opacity-70">Audit 24 jam</p>
+    <p class="mt-1 font-mono text-3xl tabular">{{ audit_24h }}</p>
+    <p class="mt-1 text-xs opacity-60">aktivitas tercatat</p>
   </div>
 </div>
+
+<h2 class="mt-8 text-sm font-semibold uppercase tracking-wide opacity-70">Layar cepat</h2>
+<ul class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+  {% if can("user:read") %}
+  <li>
+    <a class="flex items-center justify-between rounded-box border border-base-300 p-3 hover:border-primary"
+       href="/console/users">
+      <span>Pengguna</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  </li>
+  {% endif %}
+  {% if can("app:read") %}
+  <li>
+    <a class="flex items-center justify-between rounded-box border border-base-300 p-3 hover:border-primary"
+       href="/console/apps">
+      <span>Aplikasi</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  </li>
+  {% endif %}
+  {% if can("role:read") %}
+  <li>
+    <a class="flex items-center justify-between rounded-box border border-base-300 p-3 hover:border-primary"
+       href="/console/rbac">
+      <span>Peran &amp; izin</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  </li>
+  {% endif %}
+  {% if can("audit:read") %}
+  <li>
+    <a class="flex items-center justify-between rounded-box border border-base-300 p-3 hover:border-primary"
+       href="/console/audit">
+      <span>Audit</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  </li>
+  {% endif %}
+</ul>
 {% endblock %}

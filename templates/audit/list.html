@@ -1,0 +1,102 @@
+{# Halaman audit: filter di atas, tabel di bawah, pager berupa form GET biasa.
+   Tanpa JavaScript halaman ini tetap bisa disaring dan digeser halamannya. #}
+{% extends "layout.html" %}
+
+{% block title %}Audit · Sanca{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="page-title">Audit</h1>
+    <p class="mt-1 text-sm opacity-70">
+      Jejak aktivitas yang tercatat di Sanca: siapa, dari app mana, route apa, dan
+      status jawabannya.
+    </p>
+  </div>
+</div>
+
+<form class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" method="get" action="/console/audit"
+      aria-label="Filter jejak audit">
+  <div>
+    <label class="label" for="audit-app">
+      <span class="label-text text-xs uppercase tracking-wide opacity-70">Aplikasi</span>
+    </label>
+    <select id="audit-app" name="app_slug" class="select select-bordered select-sm w-full">
+      <option value="">Semua aplikasi</option>
+      {% for slug in data.apps %}
+      <option value="{{ slug }}" {% if data.app_slug == slug.as_str() %}selected{% endif %}>{{ slug }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label class="label" for="audit-actor">
+      <span class="label-text text-xs uppercase tracking-wide opacity-70">Aktor</span>
+    </label>
+    <input id="audit-actor" type="search" name="actor" value="{{ data.actor }}"
+           autocomplete="off" placeholder="id user atau label"
+           class="input input-bordered input-sm w-full">
+  </div>
+
+  <div>
+    <label class="label" for="audit-dari">
+      <span class="label-text text-xs uppercase tracking-wide opacity-70">Dari tanggal</span>
+    </label>
+    <input id="audit-dari" type="date" name="dari" value="{{ data.dari }}"
+           class="input input-bordered input-sm w-full">
+  </div>
+
+  <div>
+    <label class="label" for="audit-sampai">
+      <span class="label-text text-xs uppercase tracking-wide opacity-70">Sampai tanggal</span>
+    </label>
+    <input id="audit-sampai" type="date" name="sampai" value="{{ data.sampai }}"
+           class="input input-bordered input-sm w-full">
+  </div>
+
+  <div class="flex items-end gap-2">
+    <input type="hidden" name="limit" value="{{ data.limit }}">
+    <button type="submit" class="btn btn-primary btn-sm">Terapkan</button>
+    <a class="btn btn-ghost btn-sm" href="/console/audit">Reset</a>
+  </div>
+</form>
+
+<div class="mt-4 overflow-x-auto rounded-box border border-base-300">
+  <table class="table table-zebra table-sm">
+    <caption class="sr-only">
+      Jejak audit Sanca: waktu, aplikasi, aktor, aksi, route, status, dan request id
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Waktu (UTC)</th>
+        <th scope="col">App</th>
+        <th scope="col">Aktor</th>
+        <th scope="col">Aksi</th>
+        <th scope="col">Route</th>
+        <th scope="col" class="text-right">Status</th>
+        <th scope="col">Request id</th>
+      </tr>
+    </thead>
+    {% include "audit/rows.html" %}
+  </table>
+</div>
+
+<div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+  <p class="text-xs opacity-60">{{ data.range_label() }}</p>
+  <form method="get" action="/console/audit" class="flex items-center gap-2">
+    <input type="hidden" name="app_slug" value="{{ data.app_slug }}">
+    <input type="hidden" name="actor" value="{{ data.actor }}">
+    <input type="hidden" name="dari" value="{{ data.dari }}">
+    <input type="hidden" name="sampai" value="{{ data.sampai }}">
+    <input type="hidden" name="limit" value="{{ data.limit }}">
+    <button type="submit" name="offset" value="{{ data.prev_offset }}"
+            class="btn btn-ghost btn-sm" {% if !data.has_prev %}disabled{% endif %}>
+      Sebelumnya
+    </button>
+    <button type="submit" name="offset" value="{{ data.next_offset }}"
+            class="btn btn-ghost btn-sm" {% if !data.has_next %}disabled{% endif %}>
+      Berikutnya
+    </button>
+  </form>
+</div>
+{% endblock %}

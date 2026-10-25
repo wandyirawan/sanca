@@ -1,0 +1,152 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id,\n               occurred_at,\n               app_slug,\n               actor_type AS \"actor_type: ActorType\",\n               actor_user_id AS \"actor_user_id?\",\n               action,\n               method,\n               path,\n               status_code AS \"status_code?\",\n               request_id\n        FROM audit_events\n        WHERE ($1::text IS NULL OR app_slug = $1)\n          AND ($2::text IS NULL\n               OR actor_label ILIKE $2\n               OR actor_user_id::text ILIKE $2)\n          AND ($3::timestamptz IS NULL OR occurred_at >= $3)\n          AND ($4::timestamptz IS NULL OR occurred_at < $4)\n        ORDER BY occurred_at DESC, id DESC\n        LIMIT $5 OFFSET $6\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "occurred_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "occurred_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "app_slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "app_slug"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "actor_type: ActorType",
+        "type_info": {
+          "Custom": {
+            "name": "actor_type",
+            "kind": {
+              "Enum": [
+                "user",
+                "service",
+                "system"
+              ]
+            }
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "actor_type"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "actor_user_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "actor_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "action",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "action"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "method",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "method"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "status_code?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "status_code"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "request_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "request_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "581bf7bbba1f7b398ea366ded7b8c08c110163fa6727309c33f0881c4ec9b416"
+}

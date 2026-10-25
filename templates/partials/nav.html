@@ -17,9 +17,12 @@
     {% endif %}
     {% if can("role:read") %}
     <li>
-      <span class="menu-disabled" aria-disabled="true">
-        Peran &amp; izin <span class="badge badge-ghost badge-sm ml-auto">5B</span>
-      </span>
+      <a href="/console/rbac">Peran &amp; izin</a>
+    </li>
+    {% endif %}
+    {% if can("audit:read") %}
+    <li>
+      <a href="/console/audit">Audit</a>
     </li>
     {% endif %}
   </ul>

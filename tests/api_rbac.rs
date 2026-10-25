@@ -233,38 +233,63 @@ fn registry_memuat_semua_route_router() {
     }
 }
 
+// Katalog permission adalah kontrak antara registry route dan tabel
+// `permissions`. Yang diuji di sini adalah invariannya, bukan isi persisnya:
+// menambah route baru yang sah tidak boleh membuat test ini merah, tetapi
+// duplikat, urutan kacau, atau format `resource:action` yang rusak harus.
 #[test]
 fn permission_registry_unik_dan_terurut() {
     let permissions = registry::permissions();
-
-    assert_eq!(
-        permissions,
-        vec![
-            "app:read",
-            "app:write",
-            "auth:me",
-            "role:read",
-            "role:write",
-            "user:read",
-            "user:write"
-        ],
-        "katalog permission registry berubah; periksa handler dan test"
-    );
 
     let unique: std::collections::BTreeSet<_> = permissions.iter().collect();
     assert_eq!(
         unique.len(),
         permissions.len(),
-        "permission tidak boleh duplikat"
+        "permission tidak boleh duplikat: {permissions:?}"
     );
-    assert!(
-        permissions.contains(&"auth:me"),
-        "auth:me tetap didaftarkan supaya matrix console punya barisnya"
-    );
-    assert!(
-        permissions.iter().all(|key| key.contains(':')),
-        "semua permission wajib berbentuk resource:action"
-    );
+
+    for pair in permissions.windows(2) {
+        assert!(
+            pair[0] < pair[1],
+            "permission harus terurut menaik, tetapi {:?} muncul sebelum {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+
+    // Set minimum yang wajib ada: dipakai handler API maupun route console
+    // (matriks RBAC, layar audit, dashboard). Hilangnya salah satu berarti
+    // route-nya tidak lagi bisa diotorisasi.
+    const WAJIB: &[&str] = &[
+        "auth:me",
+        "role:read",
+        "role:write",
+        "user:read",
+        "user:write",
+        "app:read",
+        "app:write",
+        "audit:read",
+    ];
+    for wajib in WAJIB {
+        assert!(
+            permissions.contains(wajib),
+            "permission wajib {wajib:?} hilang dari registry: {permissions:?}"
+        );
+    }
+
+    for key in &permissions {
+        let mut bagian = key.split(':');
+        let resource = bagian.next().unwrap_or_default();
+        let action = bagian.next().unwrap_or_default();
+        assert!(
+            bagian.next().is_none(),
+            "permission {key:?} harus punya tepat satu titik dua"
+        );
+        assert!(
+            !resource.is_empty() && !action.is_empty(),
+            "permission {key:?} harus berbentuk resource:action dengan kedua sisi terisi"
+        );
+    }
 }
 
 #[sqlx::test]

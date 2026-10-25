@@ -72,6 +72,65 @@ pub async fn insert(pool: &PgPool, ev: &NewEvent<'_>) -> Result<i64, sqlx::Error
     .await
 }
 
+/// Filter daftar audit untuk layar console.
+///
+/// Semua kolom opsional: `None` berarti tidak memfilter. Rentang waktu memakai
+/// batas atas eksklusif (`until`) supaya satu hari penuh bisa diminta tanpa
+/// memikirkan presisi detik terakhir.
+#[derive(Debug, Clone, Copy)]
+pub struct Filter<'a> {
+    pub app_slug: Option<&'a str>,
+    /// Potongan teks yang dicocokkan ke label pelaku atau id user pelaku.
+    pub actor: Option<&'a str>,
+    pub from: Option<OffsetDateTime>,
+    pub until: Option<OffsetDateTime>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// Daftar event dengan filter lengkap untuk halaman audit console.
+///
+/// Dipisah dari `list` supaya pemanggil lama (API dan test yang sudah ada) tidak
+/// berubah bentuknya; yang ditambahkan di sini hanya dimensi waktu dan aktor
+/// berbentuk teks.
+pub async fn list_filtered(
+    pool: &PgPool,
+    filter: &Filter<'_>,
+) -> Result<Vec<AuditRow>, sqlx::Error> {
+    sqlx::query_as!(
+        AuditRow,
+        r#"
+        SELECT id,
+               occurred_at,
+               app_slug,
+               actor_type AS "actor_type: ActorType",
+               actor_user_id AS "actor_user_id?",
+               action,
+               method,
+               path,
+               status_code AS "status_code?",
+               request_id
+        FROM audit_events
+        WHERE ($1::text IS NULL OR app_slug = $1)
+          AND ($2::text IS NULL
+               OR actor_label ILIKE $2
+               OR actor_user_id::text ILIKE $2)
+          AND ($3::timestamptz IS NULL OR occurred_at >= $3)
+          AND ($4::timestamptz IS NULL OR occurred_at < $4)
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT $5 OFFSET $6
+        "#,
+        filter.app_slug,
+        filter.actor,
+        filter.from,
+        filter.until,
+        filter.limit,
+        filter.offset,
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// Daftar event terbaru. Filter app dan pelaku bersifat opsional: `None` berarti
 /// semua app / semua pelaku, jadi satu fungsi cukup untuk kedua kebutuhan itu.
 pub async fn list(

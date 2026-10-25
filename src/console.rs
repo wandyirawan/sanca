@@ -11,7 +11,9 @@
 //! harga satu verifikasi RSA jauh lebih murah daripada memfork aturan otorisasi.
 
 pub mod apps;
+pub mod audit;
 pub mod helpers;
+pub mod rbac;
 pub mod users;
 pub mod views;
 
@@ -37,7 +39,7 @@ use crate::console::views::{DashboardPage, ErrorPage, LoginPage};
 use crate::db::apps as db_apps;
 use crate::db::users as db_users;
 use crate::db::users::UserStatus;
-use crate::db::{rbac, sessions};
+use crate::db::{rbac as db_rbac, sessions};
 use crate::error::AppError;
 use crate::middleware::csrf;
 use crate::middleware::ratelimit::{PeerAddr, client_ip};
@@ -76,6 +78,8 @@ pub fn router() -> Router<AppState> {
         .route("/console", get(dashboard))
         .merge(users::router())
         .merge(apps::router())
+        .merge(rbac::router())
+        .merge(audit::router())
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,11 +270,14 @@ async fn dashboard(
 
     let counts = sqlx::query!(
         r#"
-        SELECT (SELECT count(*) FROM users) AS "users!",
-               (SELECT count(*) FROM apps) AS "apps!",
-               (SELECT count(*) FROM roles r
-                JOIN apps a ON a.id = r.app_id
-                WHERE a.slug = 'core') AS "roles!"
+        SELECT (SELECT count(*) FROM users WHERE status = 'active') AS "users_active!",
+               (SELECT count(*) FROM apps) AS "apps_count!",
+               (SELECT count(*) FROM roles) AS "roles_count!",
+               (SELECT count(*) FROM permissions) AS "permissions_count!",
+               (SELECT count(*) FROM sessions
+                WHERE revoked_at IS NULL AND expires_at > now()) AS "sessions_active!",
+               (SELECT count(*) FROM audit_events
+                WHERE occurred_at > now() - interval '24 hours') AS "audit_24h!"
         "#
     )
     .fetch_one(&state.pool)
@@ -289,9 +296,12 @@ async fn dashboard(
         csrf: token.clone(),
         user_name: user.display_name,
         user_email: user.email,
-        users_count: counts.users,
-        apps_count: counts.apps,
-        roles_count: counts.roles,
+        users_active: counts.users_active,
+        apps_count: counts.apps_count,
+        roles_count: counts.roles_count,
+        permissions_count: counts.permissions_count,
+        sessions_active: counts.sessions_active,
+        audit_24h: counts.audit_24h,
         roles: session.claims.role.clone(),
         scope: session.claims.scope.clone(),
     };
@@ -363,10 +373,10 @@ async fn issue_console_session(
     .await
     .ok()?;
 
-    let role = rbac::resolve_roles(&state.pool, user.id, app.id)
+    let role = db_rbac::resolve_roles(&state.pool, user.id, app.id)
         .await
         .ok()?;
-    let scope = rbac::resolve_scope(&state.pool, user.id, app.id)
+    let scope = db_rbac::resolve_scope(&state.pool, user.id, app.id)
         .await
         .ok()?;
 
