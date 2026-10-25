@@ -240,6 +240,8 @@ fn permission_registry_unik_dan_terurut() {
     assert_eq!(
         permissions,
         vec![
+            "app:read",
+            "app:write",
             "auth:me",
             "role:read",
             "role:write",

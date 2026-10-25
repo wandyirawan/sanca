@@ -10,6 +10,7 @@
 //! Verifikasi terjadi dua kali per request (gate + registry) dan itu disengaja:
 //! harga satu verifikasi RSA jauh lebih murah daripada memfork aturan otorisasi.
 
+pub mod apps;
 pub mod helpers;
 pub mod users;
 pub mod views;
@@ -33,7 +34,7 @@ use crate::auth::jwt::{Claims, sign_access, verify_access};
 use crate::auth::password::verify_password;
 use crate::console::helpers::hash_refresh_token;
 use crate::console::views::{DashboardPage, ErrorPage, LoginPage};
-use crate::db::apps;
+use crate::db::apps as db_apps;
 use crate::db::users as db_users;
 use crate::db::users::UserStatus;
 use crate::db::{rbac, sessions};
@@ -74,6 +75,7 @@ pub fn router() -> Router<AppState> {
         .route("/console/logout", post(logout))
         .route("/console", get(dashboard))
         .merge(users::router())
+        .merge(apps::router())
 }
 
 #[derive(Debug, Deserialize)]
@@ -318,7 +320,7 @@ async fn issue_console_session(
     headers: &HeaderMap,
     ip: &str,
 ) -> Option<IssuedSession> {
-    let app = apps::by_slug(&state.pool, CONSOLE_APP)
+    let app = db_apps::by_slug(&state.pool, CONSOLE_APP)
         .await
         .ok()?
         .filter(|app| app.is_active)?;

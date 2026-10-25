@@ -1,0 +1,55 @@
+{# Halaman penuh daftar aplikasi. Satu aksi primer di kanan atas; sisanya aksi
+   baris. Pencarian memakai HTMX dengan jeda 300 ms, sama seperti layar pengguna. #}
+{% extends "layout.html" %}
+
+{% block title %}Aplikasi · Sanca{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="page-title">Aplikasi</h1>
+    <p class="mt-1 text-sm opacity-70">
+      Service yang memakai Sanca untuk login. Setiap token terikat ke satu aplikasi.
+    </p>
+  </div>
+  {% if data.can_write %}
+  <a class="btn btn-primary btn-sm" href="/console/apps/new"
+     hx-get="/console/apps/new" hx-target="#modal-slot" hx-swap="innerHTML">
+    Tambah aplikasi
+  </a>
+  {% endif %}
+</div>
+
+<form class="mt-6 max-w-sm" role="search" action="/console/apps" method="get">
+  <label class="label" for="app-search">
+    <span class="label-text text-xs uppercase tracking-wide opacity-70">Cari aplikasi</span>
+  </label>
+  <input id="app-search" type="search" name="q" value="{{ data.q }}" autocomplete="off"
+         placeholder="potongan slug atau nama"
+         class="input input-bordered input-sm w-full"
+         hx-get="/console/apps/rows"
+         hx-trigger="keyup changed delay:300ms, search"
+         hx-target="#app-rows" hx-swap="outerHTML" hx-push-url="false">
+</form>
+
+<div class="mt-4 overflow-x-auto rounded-box border border-base-300">
+  <table class="table table-zebra table-sm">
+    <caption class="sr-only">Daftar aplikasi Sanca beserta jenis, status, dan jumlah kredensial</caption>
+    <thead>
+      <tr>
+        <th scope="col">Slug</th>
+        <th scope="col">Nama</th>
+        <th scope="col">Jenis</th>
+        <th scope="col">Status</th>
+        <th scope="col" class="text-right">TTL akses</th>
+        <th scope="col" class="text-right">Kredensial</th>
+        <th scope="col"><span class="sr-only">Aksi</span></th>
+      </tr>
+    </thead>
+    {% include "apps/rows.html" %}
+  </table>
+</div>
+
+{# Tempat modal create ditukar HTMX. Kosong pada render awal. #}
+<div id="modal-slot"></div>
+{% endblock %}

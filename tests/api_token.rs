@@ -53,7 +53,7 @@ fn test_state(pool: PgPool) -> AppState {
 
 /// Daftarkan app baru beserta satu kredensial; kembalikan app, client_id, secret.
 async fn fixture_app(pool: &PgPool, slug: &str) -> (App, String, String) {
-    let app = apps::insert(pool, slug, "App Uji", AppKind::Service)
+    let app = apps::insert(pool, slug, "App Uji", AppKind::Service, "")
         .await
         .expect("gagal membuat app fixture");
 

@@ -121,6 +121,15 @@ pub const ROUTES: &[RouteDef] = &[
     protected(Method::GET, "/console/users/{id}", "user:read"),
     protected(Method::POST, "/console/users/{id}", "user:write"),
     protected(Method::GET, "/console/users/{id}/edit", "user:write"),
+    // Layar aplikasi: daftar dan fragmen baris cukup `app:read`; membuat app dan
+    // merotasi secret menuntut `app:write`. Route rotasi didaftarkan sebagai
+    // POST tersendiri supaya penegakan tidak bergantung pada tombol yang
+    // disembunyikan template.
+    protected(Method::GET, "/console/apps", "app:read"),
+    protected(Method::GET, "/console/apps/rows", "app:read"),
+    protected(Method::GET, "/console/apps/new", "app:write"),
+    protected(Method::POST, "/console/apps", "app:write"),
+    protected(Method::POST, "/console/apps/{id}/rotate", "app:write"),
     authenticated(Method::GET, "/api/auth/me"),
     protected(Method::GET, "/api/roles", "role:read"),
     protected(Method::POST, "/api/roles", "role:write"),

@@ -1,14 +1,13 @@
 use std::io::{IsTerminal, Read};
 
-use anyhow::{Context, bail};
-use clap::{Parser, Subcommand, ValueEnum};
-use rand::TryRngCore;
-
 use crate::auth::password::hash_password;
-use crate::auth::secret::{generate_client_secret, hash_client_secret};
 use crate::config::Config;
 use crate::db::apps::{self, AppKind};
 use crate::db::{rbac, users};
+use crate::domain::apps as domain_apps;
+use crate::error::AppError;
+use anyhow::{Context, bail};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// Sanca — IAM service ringan berbasis Rust + PostgreSQL.
 #[derive(Parser, Debug)]
@@ -182,22 +181,16 @@ pub async fn run_app_command(command: &AppCommand) -> anyhow::Result<()> {
 
     match command {
         AppCommand::Create { slug, name, kind } => {
-            if apps::by_slug(&pool, slug)
-                .await
-                .context("gagal memeriksa slug yang sudah ada")?
-                .is_some()
-            {
-                bail!("app dengan slug {slug} sudah terdaftar; pakai slug lain");
-            }
-
-            let app = apps::insert(&pool, slug, name, AppKind::from(*kind))
-                .await
-                .context("gagal menyimpan app")?;
-
-            let (client_id, secret) = store_credential(&pool, &config, app.id, slug).await?;
+            // Aturan slug, pencabutan, dan penerbitan kredensial ada di
+            // `domain::apps`; CLI hanya mencetak hasilnya. Console memanggil
+            // fungsi yang sama, jadi tidak ada dua implementasi yang menyimpang.
+            let (app, credential) =
+                domain_apps::create_app(&pool, &config, slug, name, AppKind::from(*kind), "")
+                    .await
+                    .map_err(domain_error)?;
 
             println!("app dibuat: {} ({}) id {}", app.slug, name, app.id);
-            print_credential(&client_id, &secret);
+            print_credential(&credential.client_id, &credential.client_secret);
             Ok(())
         }
         AppCommand::RotateSecret { slug } => {
@@ -208,53 +201,29 @@ pub async fn run_app_command(command: &AppCommand) -> anyhow::Result<()> {
                 bail!("app dengan slug {slug} tidak ditemukan");
             };
 
-            // Urutan penting: cabut dulu, baru terbitkan. Kalau penerbitan gagal,
-            // app berhenti bisa memakai token alih-alih punya dua secret hidup.
-            apps::revoke_credentials(&pool, app.id)
+            let credential = domain_apps::rotate_secret(&pool, &config, app.id)
                 .await
-                .context("gagal mencabut kredensial lama")?;
-
-            let (client_id, secret) = store_credential(&pool, &config, app.id, slug).await?;
+                .map_err(domain_error)?;
 
             println!("secret dirotasi untuk app: {}", app.slug);
-            print_credential(&client_id, &secret);
+            print_credential(&credential.client_id, &credential.client_secret);
             Ok(())
         }
     }
 }
 
-/// Buat pasangan client_id + secret baru lalu simpan hash-nya.
-///
-/// Secret asli dikembalikan ke pemanggil untuk dicetak; tidak pernah masuk log.
-async fn store_credential(
-    pool: &sqlx::PgPool,
-    config: &Config,
-    app_id: uuid::Uuid,
-    slug: &str,
-) -> anyhow::Result<(String, String)> {
-    let client_id = new_client_id(slug);
-    let secret = generate_client_secret();
-
-    let hash = hash_client_secret(&secret, &config.client_secret_pepper)
-        .context("secret client ditolak saat hashing")?;
-
-    apps::create_credential(pool, app_id, &client_id, &hash)
-        .await
-        .context("gagal menyimpan kredensial client")?;
-
-    Ok((client_id, secret))
-}
-
-/// client_id tidak rahasia, jadi cukup mudah dibaca: slug plus 12 karakter acak
-/// hex supaya dua app dengan slug mirip tidak pernah bertabrakan.
-fn new_client_id(slug: &str) -> String {
-    let mut bytes = [0u8; 6];
-    rand::rngs::OsRng
-        .try_fill_bytes(&mut bytes)
-        .expect("RNG sistem harus selalu tersedia");
-
-    let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!("{slug}-{suffix}")
+/// Pesan CLI untuk kegagalan domain. Variant `AppError` tidak mengimplementasi
+/// `Display` karena di HTTP ia dipetakan ke kode JSON, jadi diterjemahkan di sini.
+fn domain_error(err: AppError) -> anyhow::Error {
+    match err {
+        AppError::BadRequest(message) | AppError::Conflict(message) => anyhow::anyhow!("{message}"),
+        AppError::NotFound => anyhow::anyhow!("app tidak ditemukan"),
+        AppError::Forbidden => anyhow::anyhow!("aksi ini tidak diizinkan"),
+        AppError::Unauthorized => anyhow::anyhow!("kredensial database ditolak"),
+        AppError::TooManyRequests | AppError::Internal => {
+            anyhow::anyhow!("operasi app gagal; periksa log server")
+        }
+    }
 }
 
 /// Cetak kredensial sekali, dengan peringatan bahwa secret tidak bisa dilihat lagi.

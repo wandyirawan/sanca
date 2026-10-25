@@ -96,12 +96,13 @@ pub async fn insert(
     slug: &str,
     name: &str,
     kind: AppKind,
+    description: &str,
 ) -> Result<App, sqlx::Error> {
     sqlx::query_as!(
         App,
         r#"
-        INSERT INTO apps (id, slug, name, kind)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO apps (id, slug, name, kind, description)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id, slug, name, description, kind AS "kind: AppKind",
                   is_active, access_ttl_secs, refresh_ttl_secs, redirect_uris
         "#,
@@ -109,9 +110,73 @@ pub async fn insert(
         slug,
         name,
         kind as AppKind,
+        description,
     )
     .fetch_one(pool)
     .await
+}
+
+/// Satu baris daftar app: kolom tabel ditambah jumlah kredensial yang masih hidup.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AppRow {
+    pub id: Uuid,
+    pub slug: String,
+    pub name: String,
+    pub kind: AppKind,
+    pub is_active: bool,
+    pub access_ttl_secs: i32,
+    pub live_credentials: i64,
+}
+
+/// Jumlah app yang tampil di satu halaman konsol.
+///
+/// Katalog app jauh lebih kecil daripada katalog user (biasanya belasan baris),
+/// jadi layar ini tidak memakai pager: satu permintaan mengambil semuanya.
+const LIST_LIMIT: i64 = 200;
+
+/// Daftar app terurut slug, dengan filter opsional pada slug/nama.
+///
+/// `filter` kosong atau berisi spasi saja dianggap "tanpa filter", bukan pola
+/// `%%` yang tetap memaksa pemindaian tabel.
+pub async fn list_rows(pool: &PgPool, filter: Option<&str>) -> Result<Vec<AppRow>, sqlx::Error> {
+    let pattern = filter
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(|q| format!("%{q}%"));
+
+    sqlx::query_as!(
+        AppRow,
+        r#"
+        SELECT a.id, a.slug, a.name, a.kind AS "kind: AppKind", a.is_active,
+               a.access_ttl_secs,
+               (SELECT count(*) FROM app_credentials c
+                WHERE c.app_id = a.id AND c.revoked_at IS NULL) AS "live_credentials!"
+        FROM apps a
+        WHERE ($1::text IS NULL OR a.slug ILIKE $1 OR a.name ILIKE $1)
+        ORDER BY a.slug
+        LIMIT $2
+        "#,
+        pattern.as_deref(),
+        LIST_LIMIT,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Jumlah seluruh app; dipakai membedakan "katalog kosong" dari "filter kosong".
+pub async fn count(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM apps"#)
+        .fetch_one(pool)
+        .await
+}
+
+/// Hapus app beserta kredensialnya. Hanya dipakai saat pembuatan gagal di
+/// tengah jalan supaya tidak ada app setengah jadi tanpa kredensial.
+pub async fn delete(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(r#"DELETE FROM apps WHERE id = $1"#, id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// Simpan kredensial client baru; mengembalikan id barisnya.

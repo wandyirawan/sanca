@@ -10,6 +10,11 @@
       <a href="/console/users">Pengguna</a>
     </li>
     {% endif %}
+    {% if can("app:read") %}
+    <li>
+      <a href="/console/apps">Aplikasi</a>
+    </li>
+    {% endif %}
     {% if can("role:read") %}
     <li>
       <span class="menu-disabled" aria-disabled="true">

@@ -1,0 +1,75 @@
+{# Modal pembuatan aplikasi. `modal-open` dipakai supaya dialog langsung
+   terlihat saat ditukar HTMX ke #modal-slot tanpa skrip tambahan.
+
+   Form-nya sengaja POST biasa (bukan hx-post): jawabannya adalah halaman
+   kredensial yang memuat secret, dan secret tidak boleh dikirim lewat redirect
+   atau URL. #}
+<dialog id="app-modal" class="modal modal-open" aria-modal="true" aria-labelledby="app-modal-title">
+  <div class="modal-box max-w-lg">
+    <h2 id="app-modal-title" class="text-lg font-semibold">Aplikasi baru</h2>
+    <p class="mt-1 text-xs opacity-70">
+      Setelah dibuat, secret client ditampilkan satu kali. Simpan saat itu juga.
+    </p>
+
+    <form method="post" action="/console/apps" class="mt-4 space-y-3">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+
+      <div>
+        <label class="label" for="app-slug">
+          <span class="label-text text-xs uppercase tracking-wide opacity-70">Slug</span>
+        </label>
+        <input id="app-slug" name="slug" value="{{ form.slug }}" required autocomplete="off"
+               placeholder="mis. salak-api"
+               class="input input-bordered input-sm w-full font-mono
+                      {% if form.slug_error.is_some() %}input-error{% endif %}">
+        {% if let Some(error) = form.slug_error %}
+        <p class="mt-1 text-xs text-error">{{ error }}</p>
+        {% else %}
+        <p class="mt-1 text-xs opacity-60">
+          Huruf kecil, angka, dan tanda hubung. Dipakai sebagai klaim aud setiap token.
+        </p>
+        {% endif %}
+      </div>
+
+      <div>
+        <label class="label" for="app-name">
+          <span class="label-text text-xs uppercase tracking-wide opacity-70">Nama</span>
+        </label>
+        <input id="app-name" name="name" value="{{ form.name }}" required autocomplete="off"
+               placeholder="mis. API Salak"
+               class="input input-bordered input-sm w-full">
+      </div>
+
+      <div>
+        <label class="label" for="app-description">
+          <span class="label-text text-xs uppercase tracking-wide opacity-70">Deskripsi</span>
+        </label>
+        <textarea id="app-description" name="description" rows="2"
+                  class="textarea textarea-bordered textarea-sm w-full"
+                  placeholder="Opsional: untuk apa aplikasi ini">{{ form.description }}</textarea>
+      </div>
+
+      <div>
+        <label class="label" for="app-kind">
+          <span class="label-text text-xs uppercase tracking-wide opacity-70">Jenis</span>
+        </label>
+        <select id="app-kind" name="kind" class="select select-bordered select-sm w-full">
+          <option value="web" {% if form.kind == "web" %}selected{% endif %}>web — server merender halaman</option>
+          <option value="spa" {% if form.kind == "spa" %}selected{% endif %}>spa — aplikasi browser</option>
+          <option value="service" {% if form.kind == "service" %}selected{% endif %}>service — mesin ke mesin</option>
+          <option value="cli" {% if form.kind == "cli" %}selected{% endif %}>cli — alat baris perintah</option>
+        </select>
+      </div>
+
+      {% if let Some(error) = form.general_error %}
+      <div class="alert alert-error text-sm" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <div class="modal-action">
+        <button type="button" class="btn btn-ghost btn-sm"
+                onclick="document.getElementById('modal-slot').innerHTML = ''">Batal</button>
+        <button type="submit" class="btn btn-primary btn-sm">Buat aplikasi</button>
+      </div>
+    </form>
+  </div>
+</dialog>

@@ -239,7 +239,7 @@ async fn token_app_lain_ditolak_401_bukan_403(pool: PgPool) {
     fixture_user(&pool).await;
 
     // App kedua: user boleh login di sana, tapi tokennya milik app itu.
-    apps::insert(&pool, "lain", "App Lain", apps::AppKind::Service)
+    apps::insert(&pool, "lain", "App Lain", apps::AppKind::Service, "")
         .await
         .expect("gagal membuat app kedua");
 

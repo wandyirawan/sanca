@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 /// Bikin app baru sebagai fixture, slug unik per test.
 async fn fixture_app(pool: &PgPool, slug: &str) -> Uuid {
-    apps::insert(pool, slug, "App Uji", apps::AppKind::Service)
+    apps::insert(pool, slug, "App Uji", apps::AppKind::Service, "")
         .await
         .expect("gagal membuat app fixture")
         .id
@@ -36,7 +36,7 @@ async fn fixture_user(pool: &PgPool, email: &str) -> Uuid {
 
 #[sqlx::test]
 async fn apps_insert_lookup_dan_revoke_credential(pool: PgPool) {
-    let app = apps::insert(&pool, "uji-apps", "Aplikasi Uji", apps::AppKind::Spa)
+    let app = apps::insert(&pool, "uji-apps", "Aplikasi Uji", apps::AppKind::Spa, "")
         .await
         .expect("insert app gagal");
     assert_eq!(app.slug, "uji-apps");

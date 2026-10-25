@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO apps (id, slug, name, kind)\n        VALUES ($1, $2, $3, $4)\n        RETURNING id, slug, name, description, kind AS \"kind: AppKind\",\n                  is_active, access_ttl_secs, refresh_ttl_secs, redirect_uris\n        ",
+  "query": "\n        SELECT a.id, a.slug, a.name, a.kind AS \"kind: AppKind\", a.is_active,\n               a.access_ttl_secs,\n               (SELECT count(*) FROM app_credentials c\n                WHERE c.app_id = a.id AND c.revoked_at IS NULL) AS \"live_credentials!\"\n        FROM apps a\n        WHERE ($1::text IS NULL OR a.slug ILIKE $1 OR a.name ILIKE $1)\n        ORDER BY a.slug\n        LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -38,17 +38,6 @@
       },
       {
         "ordinal": 3,
-        "name": "description",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "apps",
-            "name": "description"
-          }
-        }
-      },
-      {
-        "ordinal": 4,
         "name": "kind: AppKind",
         "type_info": {
           "Custom": {
@@ -71,7 +60,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "is_active",
         "type_info": "Bool",
         "origin": {
@@ -82,7 +71,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "access_ttl_secs",
         "type_info": "Int4",
         "origin": {
@@ -93,46 +82,16 @@
         }
       },
       {
-        "ordinal": 7,
-        "name": "refresh_ttl_secs",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "apps",
-            "name": "refresh_ttl_secs"
-          }
-        }
-      },
-      {
-        "ordinal": 8,
-        "name": "redirect_uris",
-        "type_info": "TextArray",
-        "origin": {
-          "Table": {
-            "table": "apps",
-            "name": "redirect_uris"
-          }
-        }
+        "ordinal": 6,
+        "name": "live_credentials!",
+        "type_info": "Int8",
+        "origin": "Expression"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text",
-        "Text",
-        {
-          "Custom": {
-            "name": "app_kind",
-            "kind": {
-              "Enum": [
-                "web",
-                "spa",
-                "service",
-                "cli"
-              ]
-            }
-          }
-        }
+        "Int8"
       ]
     },
     "nullable": [
@@ -142,10 +101,8 @@
       false,
       false,
       false,
-      false,
-      false,
-      false
+      null
     ]
   },
-  "hash": "be0b71f883d8e97c2111b1e5f9626245736f1c0798dcfff039506474a76116f0"
+  "hash": "c82a15515cc9a75e1e8d05547085c0f3c584f1010742978c2e543e9c1a725c2e"
 }
