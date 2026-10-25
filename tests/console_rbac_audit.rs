@@ -537,39 +537,67 @@ async fn dashboard_menampilkan_angka_yang_sama_dengan_database(pool: PgPool) {
     let app = app(pool.clone());
     let access = access_token(&app, "pembaca@example.com").await;
 
-    let expected = sqlx::query!(
+    // Counter yang stabil dihitung sebelum request, plus nilai minimum audit.
+    // Audit dipakai sebagai batas bawah saja: request GET /console ini sendiri
+    // ikut dicatat middleware audit, jadi angkanya pasti bertambah sedikit
+    // selama request berjalan dan tidak boleh di-assert persis.
+    let sebelum = sqlx::query!(
         r#"
         SELECT (SELECT count(*) FROM users WHERE status = 'active') AS "users_active!",
                (SELECT count(*) FROM apps) AS "apps_count!",
                (SELECT count(*) FROM roles) AS "roles_count!",
                (SELECT count(*) FROM permissions) AS "permissions_count!",
-               (SELECT count(*) FROM sessions
-                WHERE revoked_at IS NULL AND expires_at > now()) AS "sessions_active!",
                (SELECT count(*) FROM audit_events
-                WHERE occurred_at > now() - interval '24 hours') AS "audit_24h!"
+                WHERE occurred_at > now() - interval '24 hours') AS "audit_min!"
         "#
     )
     .fetch_one(&pool)
     .await
     .expect("gagal menghitung ekspektasi dashboard");
 
+    // Ambil isi halaman lebih dulu, baru hitung sesi dari database sesudahnya.
     let response = get(&app, "/console", &access).await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
 
+    let sesi_aktif: i64 = sqlx::query_scalar(
+        r#"
+        SELECT count(*) FROM sessions
+        WHERE revoked_at IS NULL AND expires_at > now()
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("gagal menghitung sesi aktif setelah request");
+
     for (label, value) in [
-        ("pengguna aktif", expected.users_active),
-        ("aplikasi", expected.apps_count),
-        ("role", expected.roles_count),
-        ("permission", expected.permissions_count),
-        ("sesi", expected.sessions_active),
-        ("audit", expected.audit_24h),
+        ("pengguna aktif", sebelum.users_active),
+        ("aplikasi", sebelum.apps_count),
+        ("role", sebelum.roles_count),
+        ("permission", sebelum.permissions_count),
+        ("sesi", sesi_aktif),
     ] {
         assert!(
             body.contains(&format!("tabular\">{value}</p>")),
             "kartu {label} harus menampilkan {value}"
         );
     }
+
+    // Kartu audit dibaca langsung dari HTML: harus berupa bilangan bulat, tidak
+    // boleh lebih kecil dari hitungan sebelum request, dan tidak wajar kalau
+    // melonjak jauh hanya karena satu request ini.
+    let audit_min = sebelum.audit_min;
+    let audit_card = angka_kartu(&body, "Audit 24 jam").unwrap_or_else(|| {
+        panic!("kartu Audit 24 jam harus memuat angka, minimum yang diharapkan {audit_min}")
+    });
+    assert!(
+        audit_card >= audit_min,
+        "kartu audit menampilkan {audit_card}, tidak boleh di bawah {audit_min}"
+    );
+    assert!(
+        audit_card <= audit_min + 10,
+        "kartu audit melonjak ke {audit_card}, padahal sebelum request hanya {audit_min}"
+    );
 
     assert!(
         body.contains("href=\"/console/rbac\""),
@@ -579,6 +607,17 @@ async fn dashboard_menampilkan_angka_yang_sama_dengan_database(pool: PgPool) {
         !body.contains("href=\"/console/audit\""),
         "tautan audit tidak boleh muncul tanpa audit:read"
     );
+}
+
+/// Ambil angka pada kartu dashboard yang berlabel `label`. Nilai kartu dirender
+/// sebagai `<p class="... tabular">ANGKA</p>` tepat setelah paragraf label.
+fn angka_kartu(body: &str, label: &str) -> Option<i64> {
+    let posisi_label = body.find(label)?;
+    let sesudah = &body[posisi_label..];
+    let awal = sesudah.find("tabular\">")? + "tabular\">".len();
+    let sisa = &sesudah[awal..];
+    let akhir = sisa.find('<')?;
+    sisa[..akhir].trim().parse().ok()
 }
 
 #[sqlx::test]

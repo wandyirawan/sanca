@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT (SELECT count(*) FROM users WHERE status = 'active') AS \"users_active!\",\n               (SELECT count(*) FROM apps) AS \"apps_count!\",\n               (SELECT count(*) FROM roles) AS \"roles_count!\",\n               (SELECT count(*) FROM permissions) AS \"permissions_count!\",\n               (SELECT count(*) FROM audit_events\n                WHERE occurred_at > now() - interval '24 hours') AS \"audit_min!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "users_active!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "apps_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "roles_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "permissions_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "audit_min!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c0c7e8851113489ef127104ee30183441cf654cb38de7bb5a080669b0dc62c94"
+}
