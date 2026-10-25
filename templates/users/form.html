@@ -1,0 +1,17 @@
+{# Modal create/edit. `modal-open` dipakai supaya dialog langsung terlihat saat
+   ditukar HTMX ke #modal-slot tanpa perlu skrip tambahan. #}
+<dialog id="user-modal" class="modal modal-open" aria-modal="true" aria-labelledby="user-modal-title">
+  <div class="modal-box max-w-lg">
+    <h2 id="user-modal-title" class="text-lg font-semibold">
+      {% if form.is_edit() %}Ubah pengguna{% else %}Pengguna baru{% endif %}
+    </h2>
+    <p class="mt-1 text-xs opacity-70">
+      {% if form.is_edit() %}
+      Perubahan status atau password langsung mencabut token yang sudah terbit.
+      {% else %}
+      Setelah dibuat, user bisa diberi role di layar Peran &amp; izin.
+      {% endif %}
+    </p>
+    <div class="mt-4">{% include "users/form_body.html" %}</div>
+  </div>
+</dialog>

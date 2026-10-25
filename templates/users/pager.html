@@ -1,0 +1,22 @@
+{# Pager memakai offset seperti API-nya. Tautan `href` tetap ada supaya paging
+   berfungsi tanpa JavaScript; `hx-get` hanya memperhalus jalannya. #}
+<div class="flex flex-wrap items-center justify-between gap-2">
+  <p class="text-xs opacity-70" aria-live="polite">{{ data.range_label() }}</p>
+  <div class="join">
+    {% if data.has_prev() %}
+    <a class="btn btn-sm join-item" href="/console/users?q={{ data.q|urlencode }}&amp;offset={{ data.prev_offset() }}"
+       hx-get="/console/users/rows?q={{ data.q|urlencode }}&amp;offset={{ data.prev_offset() }}"
+       hx-target="#user-rows" hx-swap="outerHTML">Sebelumnya</a>
+    {% else %}
+    <button type="button" class="btn btn-sm join-item" disabled>Sebelumnya</button>
+    {% endif %}
+
+    {% if data.has_next() %}
+    <a class="btn btn-sm join-item" href="/console/users?q={{ data.q|urlencode }}&amp;offset={{ data.next_offset() }}"
+       hx-get="/console/users/rows?q={{ data.q|urlencode }}&amp;offset={{ data.next_offset() }}"
+       hx-target="#user-rows" hx-swap="outerHTML">Berikutnya</a>
+    {% else %}
+    <button type="button" class="btn btn-sm join-item" disabled>Berikutnya</button>
+    {% endif %}
+  </div>
+</div>

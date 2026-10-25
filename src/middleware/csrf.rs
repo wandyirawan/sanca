@@ -34,11 +34,16 @@ pub fn token(jar: &CookieJar) -> (String, bool) {
 
 /// Cookie pembawa token. Sengaja tidak `httpOnly`: skrip tema di browser tidak
 /// membacanya, tapi form yang dirender HTMX butuh nilai ini tersedia.
-pub fn cookie(token: String) -> Cookie<'static> {
+///
+/// `secure` diambil dari `Config::is_prod()`, bukan dari deteksi request: di
+/// produksi cookie hanya boleh menyeberang lewat HTTPS, sedangkan di dev (http
+/// biasa) flag itu akan membuat browser membuang cookie dan login lokal gagal.
+pub fn cookie(token: String, secure: bool) -> Cookie<'static> {
     Cookie::build((COOKIE_NAME, token))
         .path("/console")
         .same_site(SameSite::Lax)
         .http_only(false)
+        .secure(secure)
         .build()
 }
 

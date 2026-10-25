@@ -1,0 +1,72 @@
+{# Isi form create/edit. Dipakai dua pembungkus: modal (HTMX) dan halaman penuh
+   (tanpa JavaScript). Error validasi tampil inline di bawah fieldnya, bukan
+   sebagai toast, supaya pengguna tahu field mana yang salah. #}
+<form method="post" action="{{ form.action }}" class="space-y-4">
+  <input type="hidden" name="_csrf" value="{{ csrf }}">
+
+  <div>
+    <label class="label" for="user-email"><span class="label-text">Email</span></label>
+    <input id="user-email" name="email" type="email" value="{{ form.email }}" required
+           autocomplete="off" autocapitalize="none" spellcheck="false"
+           class="input input-bordered w-full{% if form.email_error.is_some() %} input-error{% endif %}"
+           {% if form.is_edit() %}disabled aria-describedby="user-email-hint"{% endif %}>
+    {% if form.is_edit() %}
+    <p id="user-email-hint" class="mt-1 text-xs opacity-60">Email dipakai sebagai identitas login, jadi tidak bisa diubah.</p>
+    {% endif %}
+    {% if let Some(err) = form.email_error %}
+    <p class="mt-1 text-xs text-error" role="alert">{{ err }}</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <label class="label" for="user-name"><span class="label-text">Nama tampilan</span></label>
+    <input id="user-name" name="display_name" type="text" value="{{ form.display_name }}"
+           maxlength="200" autocomplete="off"
+           class="input input-bordered w-full{% if form.name_error.is_some() %} input-error{% endif %}">
+    {% if let Some(err) = form.name_error %}
+    <p class="mt-1 text-xs text-error" role="alert">{{ err }}</p>
+    {% endif %}
+  </div>
+
+  {% if form.is_edit() %}
+  <div>
+    <label class="label" for="user-status"><span class="label-text">Status</span></label>
+    <select id="user-status" name="status" class="select select-bordered w-full">
+      <option value="active"{% if form.status == "active" %} selected{% endif %}>Aktif — boleh login</option>
+      <option value="disabled"{% if form.status == "disabled" %} selected{% endif %}>Nonaktif — token dicabut</option>
+      <option value="pending"{% if form.status == "pending" %} selected{% endif %}>Menunggu — belum boleh login</option>
+    </select>
+  </div>
+  {% endif %}
+
+  <div>
+    <label class="label" for="user-password">
+      <span class="label-text">Password{% if form.is_edit() %} <span class="opacity-60">(opsional)</span>{% endif %}</span>
+    </label>
+    <input id="user-password" name="password" type="password" autocomplete="new-password"
+           class="input input-bordered w-full{% if form.password_error.is_some() %} input-error{% endif %}"
+           {% if !form.is_edit() %}required{% endif %}
+           {% if form.is_edit() %}aria-describedby="user-password-hint"{% endif %}>
+    <p id="user-password-hint" class="mt-1 text-xs opacity-60">
+      {% if form.is_edit() %}
+      Kosongkan bila tidak diubah. Mengisi password baru akan mencabut semua sesi user ini.
+      {% else %}
+      Minimal 12 karakter. Password disimpan sebagai hash Argon2id.
+      {% endif %}
+    </p>
+    {% if let Some(err) = form.password_error %}
+    <p class="mt-1 text-xs text-error" role="alert">{{ err }}</p>
+    {% endif %}
+  </div>
+
+  {% if let Some(err) = form.general_error %}
+  <div class="alert alert-error" role="alert"><span>{{ err }}</span></div>
+  {% endif %}
+
+  <div class="modal-action">
+    <a class="btn btn-ghost btn-sm" href="/console/users">Batal</a>
+    <button type="submit" class="btn btn-primary btn-sm">
+      {% if form.is_edit() %}Simpan perubahan{% else %}Buat pengguna{% endif %}
+    </button>
+  </div>
+</form>

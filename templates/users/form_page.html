@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+
+{% block title %}
+{% if form.is_edit() %}Ubah pengguna{% else %}Pengguna baru{% endif %} · Sanca
+{% endblock %}
+
+{% block content %}
+<div class="max-w-xl">
+  <h1 class="page-title">
+    {% if form.is_edit() %}Ubah pengguna{% else %}Pengguna baru{% endif %}
+  </h1>
+  <p class="mt-1 text-sm opacity-70">Form ini juga bisa dipakai tanpa JavaScript, langsung dari alamatnya.</p>
+
+  <div class="mt-6 rounded-box border border-base-300 bg-base-200 p-4">
+    {% include "users/form_body.html" %}
+  </div>
+</div>
+{% endblock %}

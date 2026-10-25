@@ -1,0 +1,4 @@
+{# Respons untuk HTMX: baris tabel sebagai target utama, pager ditukar
+   out-of-band supaya "1-20 dari N" ikut berubah setelah pencarian. #}
+{% include "users/rows.html" %}
+<div id="user-pager" hx-swap-oob="true">{% include "users/pager.html" %}</div>

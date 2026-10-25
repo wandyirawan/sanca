@@ -1,0 +1,53 @@
+{# Modal detail: atribut user dan daftar role. `password_hash` tidak pernah
+   dikirim ke sini, jadi tidak ada yang bisa bocor lewat HTML. #}
+<dialog id="user-detail" class="modal modal-open" aria-modal="true" aria-labelledby="user-detail-title">
+  <div class="modal-box max-w-lg">
+    <h2 id="user-detail-title" class="text-lg font-semibold">{{ detail.display_name }}</h2>
+    <p class="mt-1 font-mono text-xs opacity-70">{{ detail.email }}</p>
+
+    <dl class="mt-4 grid grid-cols-[9rem_1fr] items-baseline gap-y-2 text-sm">
+      <dt class="opacity-60">Status</dt>
+      <dd>
+        {% if detail.status == "active" %}
+        <span class="badge badge-success badge-sm">Aktif</span>
+        {% else if detail.status == "disabled" %}
+        <span class="badge badge-ghost badge-sm">Nonaktif</span>
+        {% else %}
+        <span class="badge badge-warning badge-sm">Menunggu</span>
+        {% endif %}
+      </dd>
+
+      <dt class="opacity-60">Superadmin</dt>
+      <dd>
+        {% if detail.is_superadmin %}
+        <span class="badge badge-accent badge-sm">ya</span>
+        {% else %}
+        <span class="opacity-60">tidak</span>
+        {% endif %}
+      </dd>
+
+      <dt class="opacity-60">Role</dt>
+      <dd>
+        {% if detail.role_names.is_empty() %}
+        <span class="opacity-60">belum punya role</span>
+        {% else %}
+        <span class="flex flex-wrap gap-1">
+          {% for name in detail.role_names %}
+          <span class="badge badge-ghost badge-sm">{{ name }}</span>
+          {% endfor %}
+        </span>
+        {% endif %}
+      </dd>
+
+      <dt class="opacity-60">Versi token</dt>
+      <dd class="font-mono text-xs">{{ detail.token_version }}</dd>
+
+      <dt class="opacity-60">Dibuat</dt>
+      <dd class="font-mono text-xs">{{ detail.created_at }}</dd>
+    </dl>
+
+    <div class="modal-action">
+      <a class="btn btn-ghost btn-sm" href="/console/users">Tutup</a>
+    </div>
+  </div>
+</dialog>

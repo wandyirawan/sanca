@@ -110,6 +110,17 @@ pub const ROUTES: &[RouteDef] = &[
     public(Method::GET, "/assets/{*path}"),
     // Dashboard hanya butuh login; setiap menu di dalamnya diperiksa `can()`.
     authenticated(Method::GET, "/console"),
+    // Layar pengguna: membaca daftar/detail cukup `user:read`, sedangkan form
+    // ubah dan kedua aksi tulis menuntut `user:write`. Route form tetap
+    // didaftarkan supaya halaman yang dirender tanpa JavaScript pun melewati
+    // penegakan yang sama, bukan hanya tombolnya disembunyikan.
+    protected(Method::GET, "/console/users", "user:read"),
+    protected(Method::POST, "/console/users", "user:write"),
+    protected(Method::GET, "/console/users/rows", "user:read"),
+    protected(Method::GET, "/console/users/new", "user:write"),
+    protected(Method::GET, "/console/users/{id}", "user:read"),
+    protected(Method::POST, "/console/users/{id}", "user:write"),
+    protected(Method::GET, "/console/users/{id}/edit", "user:write"),
     authenticated(Method::GET, "/api/auth/me"),
     protected(Method::GET, "/api/roles", "role:read"),
     protected(Method::POST, "/api/roles", "role:write"),

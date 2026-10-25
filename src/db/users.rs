@@ -247,6 +247,80 @@ pub async fn disable(pool: &PgPool, id: Uuid) -> Result<Option<i32>, sqlx::Error
     .await
 }
 
+/// Baris user untuk tabel konsol: kolom aman ditambah jumlah role.
+///
+/// `role_count` dihitung di SQL, bukan di loop handler, supaya satu halaman
+/// daftar tidak memicu satu query tambahan per baris.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct UserRow {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub status: UserStatus,
+    pub is_superadmin: bool,
+    pub role_count: i64,
+}
+
+/// Daftar user versi tabel konsol, terurut email, lengkap dengan jumlah role.
+///
+/// Aturan pencariannya sama dengan `list`: `q` kosong atau berisi spasi saja
+/// berarti tanpa filter, dan pencocokan memakai `ILIKE` pada email/nama.
+pub async fn list_rows(
+    pool: &PgPool,
+    q: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<UserRow>, sqlx::Error> {
+    let pattern = q
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| format!("%{text}%"));
+
+    sqlx::query_as!(
+        UserRow,
+        r#"
+        SELECT u.id, u.email::text AS "email!", u.display_name,
+               u.status AS "status: UserStatus", u.is_superadmin,
+               (SELECT count(*) FROM user_roles ur WHERE ur.user_id = u.id)
+                   AS "role_count!"
+        FROM users u
+        WHERE $1::text IS NULL
+           OR u.email::text ILIKE $1
+           OR u.display_name ILIKE $1
+        ORDER BY u.email
+        LIMIT $2 OFFSET $3
+        "#,
+        pattern,
+        limit,
+        offset,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Jumlah user yang cocok dengan filter yang sama seperti `list_rows`.
+///
+/// Dipisah supaya pager bisa menulis "1-20 dari 57" tanpa mengambil semua baris.
+pub async fn count(pool: &PgPool, q: Option<&str>) -> Result<i64, sqlx::Error> {
+    let pattern = q
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| format!("%{text}%"));
+
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "total!"
+        FROM users u
+        WHERE $1::text IS NULL
+           OR u.email::text ILIKE $1
+           OR u.display_name ILIKE $1
+        "#,
+        pattern,
+    )
+    .fetch_one(pool)
+    .await
+}
+
 /// Naikkan `token_version` tanpa mengubah kolom lain; dipakai saat akun
 /// diaktifkan kembali atau status berubah ke nilai selain `disabled`.
 pub async fn bump_token_version(pool: &PgPool, id: Uuid) -> Result<Option<i32>, sqlx::Error> {

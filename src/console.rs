@@ -11,6 +11,7 @@
 //! harga satu verifikasi RSA jauh lebih murah daripada memfork aturan otorisasi.
 
 pub mod helpers;
+pub mod users;
 pub mod views;
 
 use askama::Template;
@@ -33,7 +34,8 @@ use crate::auth::password::verify_password;
 use crate::console::helpers::hash_refresh_token;
 use crate::console::views::{DashboardPage, ErrorPage, LoginPage};
 use crate::db::apps;
-use crate::db::users::{self, UserStatus};
+use crate::db::users as db_users;
+use crate::db::users::UserStatus;
 use crate::db::{rbac, sessions};
 use crate::error::AppError;
 use crate::middleware::csrf;
@@ -71,6 +73,7 @@ pub fn router() -> Router<AppState> {
         .route("/console/login", get(login_page).post(login_submit))
         .route("/console/logout", post(logout))
         .route("/console", get(dashboard))
+        .merge(users::router())
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,7 +127,7 @@ pub async fn session_gate(
     };
 
     let Some(claims) = claims else {
-        return redirect_to_login(true);
+        return redirect_to_login(true, state.config.is_prod());
     };
 
     // Salinan token ke header Authorization: penegakan registry yang sudah ada
@@ -139,7 +142,7 @@ pub async fn session_gate(
 }
 
 /// GET /console/login — form biasa (tanpa HTMX) dengan token CSRF.
-async fn login_page(jar: CookieJar) -> Response {
+async fn login_page(State(state): State<AppState>, jar: CookieJar) -> Response {
     let (token, _) = csrf::token(&jar);
     let page = LoginPage {
         csrf: token.clone(),
@@ -148,7 +151,7 @@ async fn login_page(jar: CookieJar) -> Response {
     };
 
     match render(page) {
-        Ok(body) => (jar.add(csrf::cookie(token)), body).into_response(),
+        Ok(body) => (jar.add(csrf::cookie(token, state.config.is_prod())), body).into_response(),
         Err(err) => err.into_response(),
     }
 }
@@ -173,6 +176,7 @@ async fn login_submit(
 
     if state.login_limiter.is_blocked(&form.email, &ip) {
         return login_error(
+            &state,
             jar,
             &form.email,
             StatusCode::TOO_MANY_REQUESTS,
@@ -183,6 +187,7 @@ async fn login_submit(
     let Some(issued) = issue_console_session(&state, &form, &headers, &ip).await else {
         state.login_limiter.record_failure(&form.email, &ip);
         return login_error(
+            &state,
             jar,
             &form.email,
             StatusCode::UNAUTHORIZED,
@@ -238,7 +243,7 @@ async fn logout(
     }
 
     let mut response = Redirect::to("/console/login").into_response();
-    clear_session_cookies(&mut response);
+    clear_session_cookies(&mut response, state.config.is_prod());
     response
 }
 
@@ -250,11 +255,11 @@ async fn dashboard(
 ) -> Response {
     let user_id = match Uuid::parse_str(&session.claims.sub) {
         Ok(id) => id,
-        Err(_) => return redirect_to_login(true),
+        Err(_) => return redirect_to_login(true, state.config.is_prod()),
     };
 
-    let Ok(Some(user)) = users::detail(&state.pool, user_id).await else {
-        return redirect_to_login(true);
+    let Ok(Some(user)) = db_users::detail(&state.pool, user_id).await else {
+        return redirect_to_login(true, state.config.is_prod());
     };
 
     let counts = sqlx::query!(
@@ -290,7 +295,7 @@ async fn dashboard(
     };
 
     match render(page) {
-        Ok(body) => (jar.add(csrf::cookie(token)), body).into_response(),
+        Ok(body) => (jar.add(csrf::cookie(token, state.config.is_prod())), body).into_response(),
         Err(err) => err.into_response(),
     }
 }
@@ -318,7 +323,7 @@ async fn issue_console_session(
         .ok()?
         .filter(|app| app.is_active)?;
 
-    let user = users::by_email(&state.pool, &form.email).await.ok()??;
+    let user = db_users::by_email(&state.pool, &form.email).await.ok()??;
     if user.status != UserStatus::Active {
         return None;
     }
@@ -407,7 +412,13 @@ fn render<T: Template>(template: T) -> Result<Html<String>, AppError> {
 }
 
 /// Halaman login dengan pesan error, status sesuai jenis kegagalan.
-fn login_error(jar: CookieJar, email: &str, status: StatusCode, message: &str) -> Response {
+fn login_error(
+    state: &AppState,
+    jar: CookieJar,
+    email: &str,
+    status: StatusCode,
+    message: &str,
+) -> Response {
     let (token, _) = csrf::token(&jar);
     let page = LoginPage {
         csrf: token.clone(),
@@ -416,7 +427,12 @@ fn login_error(jar: CookieJar, email: &str, status: StatusCode, message: &str) -
     };
 
     match render(page) {
-        Ok(body) => (status, jar.add(csrf::cookie(token)), body).into_response(),
+        Ok(body) => (
+            status,
+            jar.add(csrf::cookie(token, state.config.is_prod())),
+            body,
+        )
+            .into_response(),
         Err(err) => err.into_response(),
     }
 }
@@ -437,18 +453,24 @@ fn csrf_rejected(jar: CookieJar) -> Response {
 }
 
 /// 303 ke halaman login, sekaligus membuang cookie yang sudah tidak sah.
-fn redirect_to_login(clear_cookies: bool) -> Response {
+fn redirect_to_login(clear_cookies: bool, secure: bool) -> Response {
     let mut response = Redirect::to("/console/login").into_response();
     if clear_cookies {
-        clear_session_cookies(&mut response);
+        clear_session_cookies(&mut response, secure);
     }
     response
 }
 
 /// Tambahkan dua header `Set-Cookie` yang menghapus sesi di browser.
-fn clear_session_cookies(response: &mut Response) {
+///
+/// `Secure` mengikuti lingkungan: cookie yang dipasang dengan `Secure` di
+/// produksi sebaiknya dihapus lewat respons ber-flag sama, supaya perilakunya
+/// konsisten di semua browser yang ketat soal atribut cookie.
+fn clear_session_cookies(response: &mut Response, secure: bool) {
+    let suffix = if secure { "; Secure" } else { "" };
     for value in [CLEAR_ACCESS, CLEAR_REFRESH] {
-        if let Ok(header) = header::HeaderValue::from_str(value) {
+        let line = format!("{value}{suffix}");
+        if let Ok(header) = header::HeaderValue::from_str(&line) {
             response.headers_mut().append(header::SET_COOKIE, header);
         }
     }

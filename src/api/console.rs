@@ -6,10 +6,16 @@
 //!
 //! CompressionLayer dipasang khusus di router ini: hanya aset yang punya ukuran
 //! besar, dan kompresi pada respons form/redirect hanya menambah kerja.
+//!
+//! Predikatnya sengaja tidak memakai default tower-http: default itu mengompres
+//! semua isi yang belum terkompresi menurut `Content-Type`, termasuk `font/woff2`.
+//! Font WOFF2 sudah dimampatkan di dalam formatnya sendiri (Brotli per tabel),
+//! jadi meng-gzip-nya hanya membuang CPU dan bisa menghasilkan byte lebih besar
+//! daripada berkas aslinya. Yang dikompres hanya tipe teks.
 
 use axum::Router;
 use axum::extract::Path;
-use axum::http::{StatusCode, header};
+use axum::http::{Extensions, HeaderMap, StatusCode, Version, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use rust_embed::RustEmbed;
@@ -30,9 +36,53 @@ struct Assets;
 /// Router aset. Path-nya wildcard karena isi `assets/` boleh bertambah tanpa
 /// menyentuh kode; registry mendaftarkannya sebagai route publik.
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/assets/{*path}", get(file))
-        .layer(CompressionLayer::new())
+    Router::new().route("/assets/{*path}", get(file)).layer(
+        CompressionLayer::new().compress_when(
+            compressible as fn(StatusCode, Version, &HeaderMap, &Extensions) -> bool,
+        ),
+    )
+}
+
+/// Apakah respons ini layak dikompres?
+///
+/// Hanya tipe teks yang lolos: CSS, JS, HTML, JSON, SVG, dan teks biasa. Aset
+/// biner yang sudah termampatkan (woff2, woff, png, ico, webp) dilewati supaya
+/// byte yang dikirim tidak justru membesar.
+fn compressible(
+    status: StatusCode,
+    _version: Version,
+    headers: &HeaderMap,
+    _extensions: &Extensions,
+) -> bool {
+    if !status.is_success() && status != StatusCode::NOT_FOUND {
+        return false;
+    }
+
+    let Some(value) = headers.get(header::CONTENT_TYPE) else {
+        return false;
+    };
+    let Ok(content_type) = value.to_str() else {
+        return false;
+    };
+
+    // Parameter seperti `; charset=utf-8` tidak mengubah keputusan.
+    let base = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+
+    matches!(
+        base.as_str(),
+        "text/css"
+            | "text/javascript"
+            | "text/html"
+            | "text/plain"
+            | "text/markdown"
+            | "application/json"
+            | "image/svg+xml"
+    )
 }
 
 /// Kirim satu berkas aset yang sudah tertanam.

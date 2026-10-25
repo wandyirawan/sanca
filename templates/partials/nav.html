@@ -7,9 +7,7 @@
     </li>
     {% if can("user:read") %}
     <li>
-      <span class="menu-disabled" aria-disabled="true">
-        Pengguna <span class="badge badge-ghost badge-sm ml-auto">5B</span>
-      </span>
+      <a href="/console/users">Pengguna</a>
     </li>
     {% endif %}
     {% if can("role:read") %}

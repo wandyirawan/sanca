@@ -1,0 +1,61 @@
+{% extends "layout.html" %}
+
+{% block title %}Pengguna · Sanca{% endblock %}
+
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="page-title">Pengguna</h1>
+    <p class="mt-1 text-sm opacity-70">Akun yang bisa masuk ke aplikasi di Sanca.</p>
+  </div>
+  {% if data.can_write %}
+  <a class="btn btn-primary btn-sm" href="/console/users/new"
+     hx-get="/console/users/new" hx-target="#modal-slot" hx-swap="innerHTML">
+    Tambah pengguna
+  </a>
+  {% endif %}
+</div>
+
+{# Notifikasi hasil aksi datang lewat query `?ok=`/`?err=` setelah redirect.
+   Alasannya: pesan tetap terlihat walau HTMX tidak jalan, dan tidak perlu
+   menyimpan state di sesi. #}
+{% if let Some(notice) = notice %}
+<div class="toast toast-end" role="status" aria-live="polite">
+  <div class="alert alert-{{ notice.kind }}">{{ notice.text }}</div>
+</div>
+{% endif %}
+
+<form class="mt-6 max-w-sm" role="search" action="/console/users" method="get">
+  <label class="label" for="user-search">
+    <span class="label-text text-xs uppercase tracking-wide opacity-70">Cari pengguna</span>
+  </label>
+  <input id="user-search" type="search" name="q" value="{{ data.q }}" autocomplete="off"
+         placeholder="potongan email atau nama"
+         class="input input-bordered input-sm w-full"
+         hx-get="/console/users/rows"
+         hx-trigger="keyup changed delay:300ms, search"
+         hx-target="#user-rows" hx-swap="outerHTML" hx-push-url="false">
+</form>
+
+<div class="mt-4 overflow-x-auto rounded-box border border-base-300">
+  <table class="table table-zebra table-sm">
+    <caption class="sr-only">Daftar pengguna Sanca beserta status dan jumlah role</caption>
+    <thead>
+      <tr>
+        <th scope="col">Email</th>
+        <th scope="col">Nama</th>
+        <th scope="col">Status</th>
+        <th scope="col">Superadmin</th>
+        <th scope="col" class="text-right">Role</th>
+        <th scope="col"><span class="sr-only">Aksi</span></th>
+      </tr>
+    </thead>
+    {% include "users/rows.html" %}
+  </table>
+</div>
+
+<div id="user-pager" class="mt-3">{% include "users/pager.html" %}</div>
+
+{# Tempat modal create/edit/detail ditukar HTMX. Kosong pada render awal. #}
+<div id="modal-slot"></div>
+{% endblock %}
