@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::db::apps::{App, AppKind};
 use crate::db::oauth_codes;
+use crate::db::sessions;
 use crate::error::AppError;
 
 /// Umur authorization code. Pendek disengaja: kode hanya perlu bertahan selama
@@ -38,6 +39,17 @@ pub const PKCE_METHOD_S256: &str = "S256";
 /// Panjang `code_challenge` menurut RFC 7636: base64url dari SHA-256 = 43 karakter.
 const CHALLENGE_MIN: usize = 43;
 const CHALLENGE_MAX: usize = 128;
+
+/// Panjang `code_verifier` menurut RFC 7636 §4.1.
+const VERIFIER_MIN: usize = 43;
+const VERIFIER_MAX: usize = 128;
+
+/// Batas panjang `user_agent` yang disimpan di baris sesi; header bisa panjang
+/// sewenang-wenang dan tidak ada gunanya menyimpan seluruhnya.
+const MAX_USER_AGENT: usize = 512;
+
+/// Panjang refresh token mentah sebelum base64url.
+const REFRESH_BYTES: usize = 32;
 
 /// Parameter otorisasi yang sudah dinormalkan dari query atau form.
 #[derive(Debug, Clone, Default)]
@@ -295,4 +307,235 @@ pub fn encode_component(value: &str) -> String {
         }
     }
     out
+}
+
+/// Kebalikan `encode_component`, untuk nilai `application/x-www-form-urlencoded`.
+///
+/// Hanya dipakai membaca parameter token (`code`, `code_verifier`,
+/// `redirect_uri`, `refresh_token`), yang memang bisa memuat `%` dan `+` setelah
+/// di-encode klien. Escape yang rusak dibiarkan apa adanya, bukan error: nilainya
+/// tetap akan gagal pada pemeriksaan berikutnya.
+pub fn decode_component(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).ok();
+                match hex.and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+                    Some(byte) => {
+                        out.push(byte);
+                        index += 3;
+                    }
+                    None => {
+                        out.push(bytes[index]);
+                        index += 1;
+                    }
+                }
+            }
+            // Form HTML mengirim spasi sebagai `+`.
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            other => {
+                out.push(other);
+                index += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Kegagalan pada tahap tukar kode/rotasi refresh.
+///
+/// Handler memetakan `InvalidGrant` ke 400 dan `Internal` ke 500; pembedaan ini
+/// yang membuat pesan internal tidak pernah sampai ke klien.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantError {
+    /// Kode/refresh tidak dikenal, sudah dipakai, kedaluwarsa, atau bukan milik
+    /// client ini. Semua sebab itu dijawab sama supaya tidak bisa dibedakan.
+    InvalidGrant,
+    /// Kesalahan di sisi kita; detailnya hanya masuk log.
+    Internal,
+}
+
+/// Hasil penukaran authorization code.
+pub struct ExchangedCode {
+    pub user_id: Uuid,
+    /// Sesi console yang tercatat di baris kode; menjadi klaim `sid`.
+    pub sid: Uuid,
+    /// Scope yang disetujui saat consent, apa adanya dari baris kode.
+    pub scope: Vec<String>,
+    /// Refresh token mentah; hanya hidup di nilai kembalian ini.
+    pub refresh_token: String,
+}
+
+/// Hasil rotasi refresh token.
+pub struct RefreshedSession {
+    pub user_id: Uuid,
+    /// Sesi baru hasil rotasi; menjadi klaim `sid`.
+    pub sid: Uuid,
+    pub refresh_token: String,
+}
+
+/// Verifikasi PKCE `S256`.
+///
+/// Kode tanpa `code_challenge` (app `web` yang tidak memakai PKCE) selalu lolos:
+/// verifier diabaikan. Kode dengan challenge mewajibkan verifier yang S256-nya
+/// sama persis. Perbandingan memakai `==` biasa karena challenge-nya sendiri
+/// publik (ikut di URL redirect), jadi tidak ada rahasia yang bisa ditebak dari
+/// selisih waktu.
+pub fn verify_pkce(challenge: Option<&str>, verifier: Option<&str>) -> bool {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    let Some(challenge) = challenge else {
+        return true;
+    };
+    let Some(verifier) = verifier else {
+        return false;
+    };
+    if !(VERIFIER_MIN..=VERIFIER_MAX).contains(&verifier.len()) {
+        return false;
+    }
+
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())) == challenge
+}
+
+/// Tukar authorization code menjadi sesi + refresh token.
+///
+/// Urutannya adalah keamanannya:
+/// 1. kode dikonsumsi atomik lebih dulu, jadi percobaan kedua — termasuk yang
+///    datang bersamaan — tidak mendapat baris apa pun;
+/// 2. app pemilik kode harus app yang sedang menukar;
+/// 3. `redirect_uri` harus sama persis dengan yang terikat di baris kode;
+/// 4. PKCE diperiksa terakhir, sebelum sesi dibuat.
+///
+/// Kode yang gagal di langkah mana pun tetap hangus: lebih baik klien mengulang
+/// alur otorisasi daripada kode yang sudah salah tetap bisa dipakai.
+pub async fn exchange_code(
+    pool: &PgPool,
+    app: &App,
+    code: &str,
+    redirect_uri: &str,
+    code_verifier: Option<&str>,
+    user_agent: &str,
+    ip: Option<&str>,
+) -> Result<ExchangedCode, GrantError> {
+    let stored = oauth_codes::consume(pool, &hash_code(code))
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "gagal mengonsumsi authorization code");
+            GrantError::Internal
+        })?
+        .ok_or(GrantError::InvalidGrant)?;
+
+    if stored.app_id != app.id {
+        return Err(GrantError::InvalidGrant);
+    }
+
+    if stored.redirect_uri != redirect_uri {
+        return Err(GrantError::InvalidGrant);
+    }
+
+    if !verify_pkce(stored.code_challenge.as_deref(), code_verifier) {
+        return Err(GrantError::InvalidGrant);
+    }
+
+    let (_, refresh_token) = start_session(pool, app, stored.user_id, user_agent, ip).await?;
+
+    Ok(ExchangedCode {
+        user_id: stored.user_id,
+        sid: stored.session_id,
+        scope: stored.scope,
+        refresh_token,
+    })
+}
+
+/// Rotasi refresh token: sesi lama dicabut, sesi baru diterbitkan.
+///
+/// Pencabutan dilakukan lebih dulu dan wajib berhasil. Kalau dua request memakai
+/// refresh token yang sama, hanya satu yang mendapat `true`; yang kalah ditolak,
+/// sehingga satu refresh token tidak pernah menjadi dua sesi hidup.
+pub async fn rotate_refresh(
+    pool: &PgPool,
+    app: &App,
+    refresh_token: &str,
+    user_agent: &str,
+    ip: Option<&str>,
+) -> Result<RefreshedSession, GrantError> {
+    let found = sessions::by_refresh_hash(pool, &hash_code(refresh_token))
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "gagal mencari sesi dari refresh token");
+            GrantError::Internal
+        })?;
+
+    let Some(session) = found else {
+        return Err(GrantError::InvalidGrant);
+    };
+
+    if session.app_id != app.id {
+        return Err(GrantError::InvalidGrant);
+    }
+
+    let revoked = sessions::revoke(pool, session.id).await.map_err(|err| {
+        tracing::error!(error = %err, "gagal mencabut sesi lama saat rotasi");
+        GrantError::Internal
+    })?;
+    if !revoked {
+        return Err(GrantError::InvalidGrant);
+    }
+
+    let (sid, refresh_token) = start_session(pool, app, session.user_id, user_agent, ip).await?;
+
+    Ok(RefreshedSession {
+        user_id: session.user_id,
+        sid,
+        refresh_token,
+    })
+}
+
+/// Buat baris sesi baru untuk satu user di satu app.
+///
+/// Yang disimpan hanya hash refresh token; nilai mentahnya dikembalikan sekali
+/// ke pemanggil untuk dikirim ke klien.
+async fn start_session(
+    pool: &PgPool,
+    app: &App,
+    user_id: Uuid,
+    user_agent: &str,
+    ip: Option<&str>,
+) -> Result<(Uuid, String), GrantError> {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    let mut bytes = [0u8; REFRESH_BYTES];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("RNG sistem harus selalu tersedia");
+    let refresh_token = URL_SAFE_NO_PAD.encode(bytes);
+
+    let expires_at =
+        OffsetDateTime::now_utc() + time::Duration::seconds(app.refresh_ttl_secs as i64);
+    let user_agent: String = user_agent.chars().take(MAX_USER_AGENT).collect();
+
+    let session_id = sessions::insert(
+        pool,
+        user_id,
+        app.id,
+        &hash_code(&refresh_token),
+        expires_at,
+        &user_agent,
+        ip,
+    )
+    .await
+    .map_err(|err| {
+        tracing::error!(error = %err, "gagal menyimpan sesi untuk token");
+        GrantError::Internal
+    })?;
+
+    Ok((session_id, refresh_token))
 }

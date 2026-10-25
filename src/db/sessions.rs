@@ -65,8 +65,12 @@ pub async fn by_refresh_hash(pool: &PgPool, hash: &str) -> Result<Option<Session
 }
 
 /// Cabut satu sesi. Sesi yang sudah dicabut tidak diubah lagi.
-pub async fn revoke(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query!(
+///
+/// Nilai `false` berarti tidak ada baris yang berubah — sesi sudah dicabut atau
+/// tidak ada. Pemanggil yang butuh jaminan "hanya satu pemenang" (rotasi refresh)
+/// memakai hasil ini untuk menolak request yang kalah balapan.
+pub async fn revoke(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
         r#"
         UPDATE sessions
         SET revoked_at = now()
@@ -77,7 +81,7 @@ pub async fn revoke(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
 /// Cabut semua sesi hidup milik satu user di satu app (mis. setelah ganti password).
