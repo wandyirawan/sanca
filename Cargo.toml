@@ -31,3 +31,15 @@ tracing-appender = "0.2.5"
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+
+# Debug dev: debuginfo seminimal mungkin. Backtrace tetap menyebut nomor baris,
+# tetapi variabel lokal tidak tersedia saat debugger. Ini memotong ukuran target/
+# secara besar karena semua dependency ikut membawa debuginfo.
+[profile.dev]
+debug = "line-tables-only"
+
+# Rilis: biner kecil dan cepat start, sesuai AGENTS.md §10.
+[profile.release]
+lto = "thin"
+strip = true
+panic = "abort"
