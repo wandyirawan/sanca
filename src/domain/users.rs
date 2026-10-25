@@ -85,16 +85,24 @@ pub async fn create_user(
 
 /// Ubah profil, status, dan/atau password satu user.
 ///
+/// `caller` wajib ikut bukan untuk formalitas: target yang memegang role
+/// `superadmin` hanya boleh diubah superadmin lain. Tanpa guard ini pemegang
+/// `user:write` bisa mengganti password akun yang lebih tinggi lalu memakai
+/// akun itu — eskalasi hak akses penuh lewat jalur yang terlihat sah.
+///
 /// `token_version` naik setiap kali password atau status berubah, sehingga
 /// token yang sudah terbit langsung tidak berlaku.
 pub async fn update_user(
     state: &AppState,
+    caller: &AuthUser,
     id: Uuid,
     changes: UserChanges,
 ) -> Result<UserDetail, AppError> {
     let current = users::detail(&state.pool, id)
         .await?
         .ok_or(AppError::NotFound)?;
+
+    ensure_can_modify_target(state, caller, &current).await?;
 
     if let Some(password) = changes.password.as_deref() {
         let hash =
@@ -131,6 +139,37 @@ pub async fn update_user(
     users::detail(&state.pool, id)
         .await?
         .ok_or(AppError::NotFound)
+}
+
+/// Pastikan pemanggil boleh mengubah user sasaran.
+///
+/// Sasaran dianggap "superadmin" kalau kolom `is_superadmin` benar ATAU dia
+/// memegang role `superadmin` di app pemanggil. Keduanya diperiksa karena flag
+/// kolom dan keanggotaan role bisa berbeda pada data lama.
+async fn ensure_can_modify_target(
+    state: &AppState,
+    caller: &AuthUser,
+    target: &UserDetail,
+) -> Result<(), AppError> {
+    if is_superadmin(caller) {
+        return Ok(());
+    }
+
+    // App pemanggil sudah ditentukan registry route (selalu `core` di sini),
+    // jadi role yang relevan adalah role di app itu.
+    let roles = rbac::resolve_roles(&state.pool, target.id, caller.app.id).await?;
+    let target_superadmin = target.is_superadmin || roles.iter().any(|role| role == "superadmin");
+
+    if target_superadmin {
+        tracing::warn!(
+            actor = %caller.claims.sub,
+            target = %target.id,
+            "perubahan user ditolak: sasaran memegang role superadmin"
+        );
+        return Err(AppError::Forbidden);
+    }
+
+    Ok(())
 }
 
 /// Terjemahkan error password menjadi 400 atau 500 sesuai penyebabnya.

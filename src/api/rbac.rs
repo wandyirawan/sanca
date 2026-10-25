@@ -1,14 +1,21 @@
-//! Endpoint RBAC minimal: daftar role, buat role, dan katalog permission.
+//! Endpoint RBAC: daftar role, buat role, katalog permission, isi permission
+//! sebuah role, dan hapus role.
 //!
 //! Semua operasi terikat app `core`; app lain belum dilayani pada tahap ini.
+//! Handler di sini hanya urusan bentuk request dan bentuk respons. Keputusan
+//! boleh/tidak ada di `domain::rbac`, dan SQL-nya di `db::rbac`.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{delete, get};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
+use crate::auth::extractor::AuthUser;
+use crate::db::rbac;
+use crate::domain::rbac as domain_rbac;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -22,6 +29,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/roles", get(list_roles).post(create_role))
         .route("/api/permissions", get(list_permissions))
+        .route(
+            "/api/roles/{id}/permissions",
+            get(get_role_permissions).put(set_role_permissions),
+        )
+        .route("/api/roles/{id}", delete(remove_role))
 }
 
 /// Ringkasan role untuk daftar di konsol.
@@ -62,6 +74,13 @@ pub struct PermissionEntry {
     pub is_system: bool,
 }
 
+/// Body penggantian isi permission role: set eksak, bukan tambahan.
+#[derive(Debug, Deserialize)]
+pub struct SetPermissionsRequest {
+    #[serde(default)]
+    pub permissions: Vec<String>,
+}
+
 /// Daftar role app `core` beserta jumlah permission-nya.
 async fn list_roles(State(state): State<AppState>) -> Result<Json<Vec<RoleSummary>>, AppError> {
     let roles = sqlx::query_as!(
@@ -75,7 +94,7 @@ async fn list_roles(State(state): State<AppState>) -> Result<Json<Vec<RoleSummar
         WHERE a.slug = 'core'
         GROUP BY r.id
         ORDER BY r.key
-        "#,
+        "#
     )
     .fetch_all(&state.pool)
     .await?;
@@ -143,10 +162,92 @@ async fn list_permissions(
         JOIN apps a ON a.id = p.app_id
         WHERE a.slug = 'core'
         ORDER BY p.key
-        "#,
+        "#
     )
     .fetch_all(&state.pool)
     .await?;
 
     Ok(Json(permissions))
+}
+
+/// Daftar key permission yang terpasang di satu role.
+async fn get_role_permissions(
+    State(state): State<AppState>,
+    caller: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let role = domain_rbac::role_for_app(&state, caller.app.id, id).await?;
+    let keys = rbac::permissions_of_role(&state.pool, role.id).await?;
+
+    Ok(Json(json!({
+        "role_id": role.id,
+        "key": role.key,
+        "permissions": keys,
+    })))
+}
+
+/// Ganti seluruh isi permission role (set eksak).
+///
+/// Urutan pemeriksaan penting: role sistem ditolak lebih dulu, baru kemudian
+/// scope pemberi. Dengan begitu superadmin pun tidak bisa mengubah role sistem,
+/// dan pesan penolakan untuk role sistem tidak tergantung isi scope.
+async fn set_role_permissions(
+    State(state): State<AppState>,
+    caller: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SetPermissionsRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let role = domain_rbac::role_for_app(&state, caller.app.id, id).await?;
+
+    domain_rbac::ensure_role_mutable(&role)?;
+
+    // Key dinormalkan: spasi dibuang, duplikat dihapus, urutan dibuat stabil.
+    let mut keys: Vec<String> = body
+        .permissions
+        .iter()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+        .collect();
+    keys.sort();
+    keys.dedup();
+
+    domain_rbac::ensure_can_grant(&caller, &keys)?;
+
+    // Key yang tidak ada di katalog app ini adalah kesalahan bentuk request,
+    // bukan masalah izin, jadi dijawab 400.
+    for key in &keys {
+        if rbac::permission_id_by_key(&state.pool, role.app_id, key)
+            .await?
+            .is_none()
+        {
+            return Err(AppError::BadRequest(format!(
+                "permission \"{key}\" tidak dikenal di app ini"
+            )));
+        }
+    }
+
+    rbac::set_role_permissions(&state.pool, role.id, &keys).await?;
+
+    Ok(Json(json!({
+        "role_id": role.id,
+        "key": role.key,
+        "permissions": keys,
+    })))
+}
+
+/// Hapus role non-sistem. Role `is_system` selalu ditolak 403.
+async fn remove_role(
+    State(state): State<AppState>,
+    caller: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let role = domain_rbac::role_for_app(&state, caller.app.id, id).await?;
+
+    domain_rbac::ensure_role_mutable(&role)?;
+
+    if !rbac::delete_role(&state.pool, role.id).await? {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }

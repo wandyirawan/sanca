@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO role_permissions (role_id, permission_id)\n        SELECT $1, p.id\n        FROM permissions p\n        JOIN roles r ON r.app_id = p.app_id\n        WHERE r.id = $1\n          AND p.key = ANY($2)\n        ON CONFLICT DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "61cf467dd17644f1eb08ab72258441e4785156f26bb67bccda8f963c105a77c9"
+}

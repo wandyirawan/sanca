@@ -500,6 +500,94 @@ async fn patch_password_menaikkan_token_version(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn patch_password_superadmin_oleh_non_superadmin_ditolak_403(pool: PgPool) {
+    sync_permissions(&pool).await;
+
+    // Pemanggil punya `user:write` — cukup untuk route — tetapi bukan superadmin.
+    fixture_user(&pool, "operator@example.com", "operator", &["user:write"]).await;
+
+    // Sasaran memegang role superadmin dan flag kolom superadmin.
+    let target = fixture_user(&pool, "sasaran@example.com", "sasaran", &[]).await;
+    give_superadmin(&pool, target).await;
+
+    let app = build_app(test_state(pool.clone()));
+    let token = login(&app, "operator@example.com", PASSWORD).await;
+
+    let (status, body) = send(
+        &app,
+        json_request(
+            "PATCH",
+            &format!("/api/users/{target}"),
+            json!({ "password": PASSWORD_BARU }),
+            Some(&token),
+        ),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "mengganti password superadmin harus 403: {body}"
+    );
+
+    // Password sasaran tidak berubah: login lama tetap jalan, password baru tidak.
+    let (status, _) = login_response(&app, "sasaran@example.com", PASSWORD).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "password lama superadmin harus tetap berlaku"
+    );
+    let (status, _) = login_response(&app, "sasaran@example.com", PASSWORD_BARU).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "password pengganti tidak boleh berlaku"
+    );
+
+    // Penonaktifan akun superadmin juga ditolak lewat jalur yang sama.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "PATCH",
+            &format!("/api/users/{target}"),
+            json!({ "status": "disabled" }),
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "menonaktifkan superadmin harus 403: {body}"
+    );
+}
+
+#[sqlx::test]
+async fn superadmin_boleh_mengubah_superadmin_lain_200(pool: PgPool) {
+    sync_permissions(&pool).await;
+    let admin = superadmin_fixture(&pool).await;
+    let target = fixture_user(&pool, "super-lain@example.com", "super-lain", &[]).await;
+    give_superadmin(&pool, target).await;
+
+    let app = build_app(test_state(pool.clone()));
+    let token = login(&app, &admin, PASSWORD).await;
+
+    let (status, body) = send(
+        &app,
+        json_request(
+            "PATCH",
+            &format!("/api/users/{target}"),
+            json!({ "display_name": "Super Lain" }),
+            Some(&token),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "harus 200: {body}");
+    assert_eq!(body["display_name"], "Super Lain");
+}
+
+#[sqlx::test]
 async fn patch_status_disabled_membuat_login_gagal(pool: PgPool) {
     sync_permissions(&pool).await;
     let admin = superadmin_fixture(&pool).await;

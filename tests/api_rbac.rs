@@ -202,6 +202,11 @@ fn registry_memuat_semua_route_router() {
         (Method::POST, "/api/users"),
         (Method::GET, "/api/users/{id}"),
         (Method::PATCH, "/api/users/{id}"),
+        (Method::GET, "/api/roles/{id}/permissions"),
+        (Method::PUT, "/api/roles/{id}/permissions"),
+        (Method::DELETE, "/api/roles/{id}"),
+        (Method::POST, "/api/users/{id}/roles"),
+        (Method::DELETE, "/api/users/{id}/roles/{role_id}"),
     ];
 
     for (method, path) in routes {
@@ -505,4 +510,297 @@ async fn superadmin_get_roles_tetap_200(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::OK, "superadmin me harus 200: {body}");
     assert_eq!(body["typ"], "user");
+}
+
+/// Id role lewat key di app core.
+async fn role_id_by_key(pool: &PgPool, key: &str) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM roles WHERE app_id = $1 AND key = $2")
+        .bind(Uuid::parse_str(CORE_APP_ID).unwrap())
+        .bind(key)
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|err| panic!("role {key} harus ada: {err}"))
+}
+
+/// Jumlah permission yang menempel di satu role.
+async fn permission_count(pool: &PgPool, role_id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM role_permissions WHERE role_id = $1")
+        .bind(role_id)
+        .fetch_one(pool)
+        .await
+        .expect("hitung permission role gagal")
+}
+
+/// Buat role kosong langsung di DB; dipakai saat yang diuji bukan pembuatannya.
+async fn insert_empty_role(pool: &PgPool, key: &str) -> Uuid {
+    let role_id = Uuid::now_v7();
+
+    sqlx::query("INSERT INTO roles (id, app_id, key, name) VALUES ($1, $2, $3, $4)")
+        .bind(role_id)
+        .bind(Uuid::parse_str(CORE_APP_ID).unwrap())
+        .bind(key)
+        .bind(format!("Role {key}"))
+        .execute(pool)
+        .await
+        .expect("gagal membuat role kosong");
+
+    role_id
+}
+
+#[sqlx::test]
+async fn grant_permission_di_luar_scope_ditolak_403(pool: PgPool) {
+    sync_permissions(&pool).await;
+    fixture_user(
+        &pool,
+        "penulis@example.com",
+        "penulis",
+        &["role:read", "role:write"],
+    )
+    .await;
+    let role_id = insert_empty_role(&pool, "target-grant").await;
+    let app = build_app(test_state(pool.clone()));
+    let token = login(&app, "penulis@example.com", "core").await;
+
+    // `user:write` tidak ada di scope pemanggil, jadi menambahkannya ke role
+    // mana pun adalah eskalasi dan harus ditolak.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "PUT",
+            &format!("/api/roles/{role_id}/permissions"),
+            json!({ "permissions": ["role:read", "user:write"] }),
+            Some(&token),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "harus 403: {body}");
+    assert_eq!(
+        permission_count(&pool, role_id).await,
+        0,
+        "penolakan tidak boleh menyisakan perubahan setengah jadi"
+    );
+}
+
+#[sqlx::test]
+async fn grant_dalam_scope_tetap_boleh_200(pool: PgPool) {
+    sync_permissions(&pool).await;
+    fixture_user(
+        &pool,
+        "penulis-izin@example.com",
+        "penulis-izin",
+        &["role:read", "role:write"],
+    )
+    .await;
+    let role_id = insert_empty_role(&pool, "target-dalam-scope").await;
+    let app = build_app(test_state(pool.clone()));
+    let token = login(&app, "penulis-izin@example.com", "core").await;
+
+    let (status, body) = send(
+        &app,
+        json_request(
+            "PUT",
+            &format!("/api/roles/{role_id}/permissions"),
+            json!({ "permissions": ["role:read"] }),
+            Some(&token),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "harus 200: {body}");
+    assert_eq!(body["permissions"], json!(["role:read"]));
+
+    let (status, body) = send(
+        &app,
+        json_request(
+            "GET",
+            &format!("/api/roles/{role_id}/permissions"),
+            Value::Null,
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "GET harus 200: {body}");
+    assert_eq!(body["permissions"], json!(["role:read"]));
+}
+
+#[sqlx::test]
+async fn assign_role_superadmin_ke_diri_sendiri_ditolak_403(pool: PgPool) {
+    sync_permissions(&pool).await;
+    let user_id = fixture_user(&pool, "naik@example.com", "naik", &["role:write"]).await;
+    let superadmin_id = role_id_by_key(&pool, "superadmin").await;
+    let app = build_app(test_state(pool.clone()));
+    let token = login(&app, "naik@example.com", "core").await;
+
+    let (status, body) = send(
+        &app,
+        json_request(
+            "POST",
+            &format!("/api/users/{user_id}/roles"),
+            json!({ "role_id": superadmin_id }),
+            Some(&token),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "harus 403: {body}");
+
+    let menempel: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM user_roles WHERE user_id = $1 AND role_id = $2")
+            .bind(user_id)
+            .bind(superadmin_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(menempel, 0, "role superadmin tidak boleh menempel");
+}
+
+#[sqlx::test]
+async fn role_is_system_tidak_bisa_diubah_atau_dihapus(pool: PgPool) {
+    sync_permissions(&pool).await;
+    let admin_id = fixture_user(&pool, "super-beku@example.com", "super-beku", &[]).await;
+    give_superadmin(&pool, admin_id).await;
+    let superadmin_id = role_id_by_key(&pool, "superadmin").await;
+    let app = build_app(test_state(pool.clone()));
+    let token = login(&app, "super-beku@example.com", "core").await;
+
+    // Superadmin sekalipun tidak boleh mengubah isi role sistem.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "PUT",
+            &format!("/api/roles/{superadmin_id}/permissions"),
+            json!({ "permissions": ["role:read"] }),
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "PUT harus 403: {body}");
+
+    // Role sistem juga tidak bisa dihapus.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "DELETE",
+            &format!("/api/roles/{superadmin_id}"),
+            Value::Null,
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "DELETE harus 403: {body}");
+
+    let masih_ada: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM roles WHERE id = $1)")
+        .bind(superadmin_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(masih_ada, "role superadmin harus tetap ada");
+}
+
+#[sqlx::test]
+async fn superadmin_kelola_role_lalu_assign_dan_unassign(pool: PgPool) {
+    sync_permissions(&pool).await;
+    let admin_id = fixture_user(&pool, "super-kelola@example.com", "super-kelola", &[]).await;
+    give_superadmin(&pool, admin_id).await;
+    let auditor = fixture_user(&pool, "auditor@example.com", "auditor-lama", &[]).await;
+    let app = build_app(test_state(pool.clone()));
+    let token = login(&app, "super-kelola@example.com", "core").await;
+
+    // 1. Superadmin membuat role baru.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "POST",
+            "/api/roles",
+            json!({ "key": "auditor", "name": "Auditor" }),
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "buat role harus 201: {body}");
+    let role_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    // 2. Isi permission role secara eksak.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "PUT",
+            &format!("/api/roles/{role_id}/permissions"),
+            json!({ "permissions": ["role:read"] }),
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "PUT harus 200: {body}");
+    assert_eq!(body["permissions"], json!(["role:read"]));
+
+    // 3. Assign role ke user lain.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "POST",
+            &format!("/api/users/{auditor}/roles"),
+            json!({ "role_id": role_id }),
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "assign harus 204: {body}");
+
+    // 4. Login ulang: scope token ikut memuat permission role baru.
+    let token_auditor = login(&app, "auditor@example.com", "core").await;
+    let (status, body) = send(
+        &app,
+        json_request("GET", "/api/auth/me", Value::Null, Some(&token_auditor)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "me harus 200: {body}");
+    assert_eq!(body["scope"], json!(["role:read"]), "scope harus terisi");
+
+    let (status, body) = send(
+        &app,
+        json_request("GET", "/api/roles", Value::Null, Some(&token_auditor)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "GET roles harus 200: {body}");
+
+    // 5. Cabut role: login berikutnya kembali tanpa scope.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "DELETE",
+            &format!("/api/users/{auditor}/roles/{role_id}"),
+            Value::Null,
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "unassign harus 204: {body}");
+
+    let token_kosong = login(&app, "auditor@example.com", "core").await;
+    let (status, body) = send(
+        &app,
+        json_request("GET", "/api/auth/me", Value::Null, Some(&token_kosong)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "me harus 200: {body}");
+    assert_eq!(body["scope"], json!([]), "scope harus kosong lagi");
+
+    // 6. Role non-sistem boleh dihapus.
+    let (status, body) = send(
+        &app,
+        json_request(
+            "DELETE",
+            &format!("/api/roles/{role_id}"),
+            Value::Null,
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "hapus role harus 204: {body}"
+    );
 }

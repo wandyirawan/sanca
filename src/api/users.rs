@@ -5,14 +5,16 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::auth::extractor::AuthUser;
+use crate::db::rbac;
 use crate::db::users::{self, UserDetail, UserStatus};
+use crate::domain::rbac as domain_rbac;
 use crate::domain::users::{self as domain_users, NewUser, UserChanges};
 use crate::error::AppError;
 use crate::state::AppState;
@@ -28,6 +30,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/users", get(list_users).post(create_user))
         .route("/api/users/{id}", get(get_user).patch(patch_user))
+        .route("/api/users/{id}/roles", post(assign_role))
+        .route("/api/users/{id}/roles/{role_id}", delete(unassign_role))
 }
 
 /// Parameter daftar: pencarian bebas dan paging sederhana.
@@ -144,9 +148,20 @@ async fn create_user(
     Ok((StatusCode::CREATED, Json(UserResponse::from(user))))
 }
 
+/// Body pemberian role ke user.
+#[derive(Debug, Deserialize)]
+pub struct AssignRoleRequest {
+    pub role_id: Uuid,
+}
+
 /// Ubah sebagian data user. Password dan status yang berubah mencabut token lama.
+///
+/// `caller` wajib ikut karena target yang punya role `superadmin` hanya boleh
+/// diubah oleh superadmin lain; tanpa identitas pemanggil, pemegang `user:write`
+/// bisa mengambil alih akun yang lebih tinggi.
 async fn patch_user(
     State(state): State<AppState>,
+    caller: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, AppError> {
@@ -173,6 +188,7 @@ async fn patch_user(
 
     let user = domain_users::update_user(
         &state,
+        &caller,
         id,
         UserChanges {
             display_name: body.display_name,
@@ -183,6 +199,47 @@ async fn patch_user(
     .await?;
 
     Ok(Json(UserResponse::from(user)))
+}
+
+/// Beri satu role ke user. 204 kalau berhasil, juga kalau user sudah punya role itu.
+async fn assign_role(
+    State(state): State<AppState>,
+    caller: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<AssignRoleRequest>,
+) -> Result<StatusCode, AppError> {
+    // User target harus ada lebih dulu, supaya id yang salah dijawab 404 dan
+    // bukan 500 karena foreign key.
+    users::detail(&state.pool, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let role = domain_rbac::role_for_app(&state, caller.app.id, body.role_id).await?;
+
+    domain_rbac::ensure_can_assign_role(&state, &caller, &role).await?;
+
+    let granted_by = domain_rbac::caller_id(&caller)?;
+    rbac::assign_role(&state.pool, id, role.id, granted_by).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Cabut satu role dari user. 204 walau user memang tidak punya role itu,
+/// karena hasil akhirnya sama: role tidak lagi menempel.
+async fn unassign_role(
+    State(state): State<AppState>,
+    caller: AuthUser,
+    Path((id, role_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let role = domain_rbac::role_for_app(&state, caller.app.id, role_id).await?;
+
+    // Mencabut role sistem hanya boleh dilakukan superadmin: role itu penentu
+    // seluruh akses, jadi keanggotaannya tidak diubah pemegang role:write biasa.
+    domain_rbac::ensure_can_touch_membership(&caller, &role)?;
+
+    rbac::unassign_role(&state.pool, id, role.id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Nama status untuk JSON; sama dengan nilai enum Postgres.
