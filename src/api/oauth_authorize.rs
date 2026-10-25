@@ -276,18 +276,35 @@ async fn prepare(
         }));
     }
 
-    let app = apps::by_slug(&state.pool, &request.client_id)
+    // `client_id` adalah kredensial, bukan slug app. Nilainya berasal dari
+    // tabel `app_credentials`; slug hanya dipakai sebagai awalan saat kredensial
+    // diterbitkan. Mencari app langsung lewat slug akan menolak client yang sah,
+    // karena `uji-oauth6` dan `uji-oauth6-fd4a7b150682` adalah dua hal berbeda.
+    let credential = apps::credential_by_client_id(&state.pool, &request.client_id)
         .await
         .map_err(|err| {
-            tracing::error!(error = %err, "gagal mencari app untuk authorize");
+            tracing::error!(error = %err, "gagal mencari kredensial client untuk authorize");
             Problem::Internal
-        })?
-        .ok_or_else(|| {
-            Problem::Rejected(AuthorizeError {
-                code: "invalid_request",
-                description: "client_id tidak dikenal".to_string(),
-            })
         })?;
+
+    // Kredensial yang tidak ada dan app yang tidak aktif dijawab dengan pesan
+    // yang sama, supaya tidak bisa dipakai menebak client_id mana yang terdaftar.
+    let app = match credential {
+        Some(credential) => apps::by_id(&state.pool, credential.app_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "gagal mencari app dari kredensial client");
+                Problem::Internal
+            })?
+            .filter(|app| app.is_active),
+        None => None,
+    }
+    .ok_or_else(|| {
+        Problem::Rejected(AuthorizeError {
+            code: "invalid_request",
+            description: "client_id tidak dikenal".to_string(),
+        })
+    })?;
 
     oauth::validate_authorize(&app, &request).map_err(Problem::Rejected)?;
 

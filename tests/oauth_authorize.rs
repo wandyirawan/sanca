@@ -5,6 +5,10 @@
 //! penegakan registry, CSRF, dan yang paling penting — bahwa `redirect_uri` harus
 //! cocok persis, bahwa `spa` tanpa PKCE ditolak, dan bahwa database hanya
 //! menyimpan hash kode, bukan kode aslinya.
+//!
+//! `client_id` di sini selalu diambil dari tabel `app_credentials`, bukan dari
+//! slug app: slug tidak pernah dipakai client sebagai kredensial, dan test yang
+//! memakai slug akan lolos meski resolusinya salah.
 
 use axum::Router;
 use axum::body::Body;
@@ -14,8 +18,9 @@ use http_body_util::BodyExt;
 use sanca::auth::keys::SigningKey;
 use sanca::auth::password::hash_password;
 use sanca::config::{Config, Environment, LogFormat};
-use sanca::db::apps::{self, AppKind};
+use sanca::db::apps::{self, App, AppKind};
 use sanca::db::users;
+use sanca::domain::apps as domain_apps;
 use sanca::domain::oauth::hash_code;
 use sanca::middleware::csrf;
 use sanca::rbac::sync as rbac_sync;
@@ -76,8 +81,17 @@ async fn fixture_user(pool: &PgPool, email: &str) -> Uuid {
         .id
 }
 
-/// App tujuan dengan satu `redirect_uri` terdaftar.
-async fn fixture_app(pool: &PgPool, slug: &str, kind: AppKind, redirect_uri: &str) -> Uuid {
+/// App tujuan beserta kredensial hidupnya.
+///
+/// `client_id` diambil dari kredensial yang benar-benar diterbitkan aplikasi,
+/// jadi bentuknya selalu `<slug>-<hex>` — berbeda dari slug app itu sendiri.
+struct Fixture {
+    app: App,
+    client_id: String,
+}
+
+/// App tujuan dengan satu `redirect_uri` terdaftar dan satu kredensial hidup.
+async fn fixture_app(pool: &PgPool, slug: &str, kind: AppKind, redirect_uri: &str) -> Fixture {
     let app = apps::insert(pool, slug, &format!("App {slug}"), kind, "")
         .await
         .expect("gagal membuat app fixture");
@@ -89,7 +103,14 @@ async fn fixture_app(pool: &PgPool, slug: &str, kind: AppKind, redirect_uri: &st
         .await
         .expect("gagal mengisi redirect_uris");
 
-    app.id
+    let issued = domain_apps::rotate_secret(pool, &config_with(Environment::Dev), app.id)
+        .await
+        .expect("gagal menerbitkan kredensial fixture");
+
+    Fixture {
+        app,
+        client_id: issued.client_id,
+    }
 }
 
 fn set_cookie(response: &axum::response::Response, name: &str) -> Option<String> {
@@ -195,12 +216,17 @@ fn authorize_uri(client_id: &str, redirect_uri: &str, extra: &str) -> String {
 async fn consent_200_untuk_spa_dengan_pkce(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "izin@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "izin@example.com").await;
 
-    let response = get(&app, &authorize_uri("uji-spa", CALLBACK, ""), &access).await;
+    let response = get(
+        &app,
+        &authorize_uri(&fixture.client_id, CALLBACK, ""),
+        &access,
+    )
+    .await;
     assert_eq!(
         response.status(),
         StatusCode::OK,
@@ -221,13 +247,14 @@ async fn consent_200_untuk_spa_dengan_pkce(pool: PgPool) {
 async fn spa_tanpa_code_challenge_ditolak_400(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "tanpa-pkce@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "tanpa-pkce@example.com").await;
 
     let uri = format!(
-        "/oauth/authorize?response_type=code&client_id=uji-spa&redirect_uri={CALLBACK}&state=abc"
+        "/oauth/authorize?response_type=code&client_id={}&redirect_uri={CALLBACK}&state=abc",
+        fixture.client_id
     );
     let response = get(&app, &uri, &access).await;
 
@@ -244,12 +271,17 @@ async fn spa_tanpa_code_challenge_ditolak_400(pool: PgPool) {
 async fn kind_service_ditolak_400(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "service@example.com").await;
-    fixture_app(&pool, "uji-service", AppKind::Service, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-service", AppKind::Service, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "service@example.com").await;
 
-    let response = get(&app, &authorize_uri("uji-service", CALLBACK, ""), &access).await;
+    let response = get(
+        &app,
+        &authorize_uri(&fixture.client_id, CALLBACK, ""),
+        &access,
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(location(&response).is_none());
@@ -259,14 +291,14 @@ async fn kind_service_ditolak_400(pool: PgPool) {
 async fn redirect_uri_tidak_terdaftar_ditolak_tanpa_redirect(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "redirect@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "redirect@example.com").await;
 
     // Prefix yang mirip pun tidak boleh lolos: exact match, bukan awalan.
     let jahat = "http://localhost:9000/cb-lain";
-    let response = get(&app, &authorize_uri("uji-spa", jahat, ""), &access).await;
+    let response = get(&app, &authorize_uri(&fixture.client_id, jahat, ""), &access).await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
@@ -279,14 +311,14 @@ async fn redirect_uri_tidak_terdaftar_ditolak_tanpa_redirect(pool: PgPool) {
 #[sqlx::test]
 async fn belum_login_diarahkan_ke_halaman_login(pool: PgPool) {
     sync_permissions(&pool).await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let response = app
         .clone()
         .oneshot(
             Request::builder()
-                .uri(authorize_uri("uji-spa", CALLBACK, ""))
+                .uri(authorize_uri(&fixture.client_id, CALLBACK, ""))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -309,19 +341,25 @@ async fn belum_login_diarahkan_ke_halaman_login(pool: PgPool) {
 async fn allow_mengembalikan_303_dengan_code_dan_state(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "setuju@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "setuju@example.com").await;
 
-    let halaman = get(&app, &authorize_uri("uji-spa", CALLBACK, ""), &access).await;
+    let halaman = get(
+        &app,
+        &authorize_uri(&fixture.client_id, CALLBACK, ""),
+        &access,
+    )
+    .await;
     assert_eq!(halaman.status(), StatusCode::OK);
     let token = set_cookie(&halaman, csrf::COOKIE_NAME).expect("cookie CSRF wajib ada");
 
     let challenge = "A".repeat(43);
     let body = format!(
-        "response_type=code&client_id=uji-spa&redirect_uri={CALLBACK}&state=xyz-123\
-         &code_challenge={challenge}&code_challenge_method=S256&decision=allow&_csrf={token}"
+        "response_type=code&client_id={}&redirect_uri={CALLBACK}&state=xyz-123\
+         &code_challenge={challenge}&code_challenge_method=S256&decision=allow&_csrf={token}",
+        fixture.client_id
     );
     let response = post_form(&app, "/oauth/authorize", &access, &token, &body).await;
 
@@ -338,18 +376,24 @@ async fn allow_mengembalikan_303_dengan_code_dan_state(pool: PgPool) {
 async fn yang_disimpan_hanya_hash_kode(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "hash@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool.clone());
     let access = access_token(&app, "hash@example.com").await;
 
-    let halaman = get(&app, &authorize_uri("uji-spa", CALLBACK, ""), &access).await;
+    let halaman = get(
+        &app,
+        &authorize_uri(&fixture.client_id, CALLBACK, ""),
+        &access,
+    )
+    .await;
     let token = set_cookie(&halaman, csrf::COOKIE_NAME).expect("cookie CSRF wajib ada");
 
     let challenge = "A".repeat(43);
     let body = format!(
-        "response_type=code&client_id=uji-spa&redirect_uri={CALLBACK}\
-         &code_challenge={challenge}&code_challenge_method=S256&decision=allow&_csrf={token}"
+        "response_type=code&client_id={}&redirect_uri={CALLBACK}\
+         &code_challenge={challenge}&code_challenge_method=S256&decision=allow&_csrf={token}",
+        fixture.client_id
     );
     let response = post_form(&app, "/oauth/authorize", &access, &token, &body).await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
@@ -392,18 +436,24 @@ async fn yang_disimpan_hanya_hash_kode(pool: PgPool) {
 async fn deny_mengembalikan_access_denied(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "batal@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "batal@example.com").await;
 
-    let halaman = get(&app, &authorize_uri("uji-spa", CALLBACK, ""), &access).await;
+    let halaman = get(
+        &app,
+        &authorize_uri(&fixture.client_id, CALLBACK, ""),
+        &access,
+    )
+    .await;
     let token = set_cookie(&halaman, csrf::COOKIE_NAME).expect("cookie CSRF wajib ada");
 
     let challenge = "A".repeat(43);
     let body = format!(
-        "response_type=code&client_id=uji-spa&redirect_uri={CALLBACK}&state=xyz-123\
-         &code_challenge={challenge}&code_challenge_method=S256&decision=deny&_csrf={token}"
+        "response_type=code&client_id={}&redirect_uri={CALLBACK}&state=xyz-123\
+         &code_challenge={challenge}&code_challenge_method=S256&decision=deny&_csrf={token}",
+        fixture.client_id
     );
     let response = post_form(&app, "/oauth/authorize", &access, &token, &body).await;
 
@@ -419,15 +469,16 @@ async fn deny_mengembalikan_access_denied(pool: PgPool) {
 async fn post_consent_tanpa_csrf_ditolak_403(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "csrf@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "csrf@example.com").await;
 
     let challenge = "A".repeat(43);
     let body = format!(
-        "response_type=code&client_id=uji-spa&redirect_uri={CALLBACK}\
-         &code_challenge={challenge}&code_challenge_method=S256&decision=allow&_csrf=salah"
+        "response_type=code&client_id={}&redirect_uri={CALLBACK}\
+         &code_challenge={challenge}&code_challenge_method=S256&decision=allow&_csrf=salah",
+        fixture.client_id
     );
     let response = post_form(&app, "/oauth/authorize", &access, "benar", &body).await;
 
@@ -439,17 +490,78 @@ async fn post_consent_tanpa_csrf_ditolak_403(pool: PgPool) {
 async fn pkce_plain_ditolak_400(pool: PgPool) {
     sync_permissions(&pool).await;
     fixture_user(&pool, "plain@example.com").await;
-    fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
 
     let app = app(pool);
     let access = access_token(&app, "plain@example.com").await;
 
     let uri = format!(
-        "/oauth/authorize?response_type=code&client_id=uji-spa&redirect_uri={CALLBACK}\
+        "/oauth/authorize?response_type=code&client_id={}&redirect_uri={CALLBACK}\
          &code_challenge={}&code_challenge_method=plain",
+        fixture.client_id,
         "A".repeat(43)
     );
     let response = get(&app, &uri, &access).await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Regresi: client_id adalah kredensial, bukan slug app. Mengirim slug harus
+/// ditolak sebagai client tak dikenal, bukan diam-diam dianggap sah.
+#[sqlx::test]
+async fn client_id_berupa_slug_ditolak_400(pool: PgPool) {
+    sync_permissions(&pool).await;
+    fixture_user(&pool, "slug@example.com").await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+
+    let app = app(pool);
+    let access = access_token(&app, "slug@example.com").await;
+
+    let response = get(&app, &authorize_uri("uji-spa", CALLBACK, ""), &access).await;
+
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "slug app tidak boleh diterima sebagai client_id"
+    );
+    assert!(location(&response).is_none());
+    let html = body_text(response).await;
+    assert!(
+        html.contains("client_id tidak dikenal"),
+        "pesan penolakan harus menyebut client_id tidak dikenal"
+    );
+    assert_ne!(fixture.app.slug, fixture.client_id);
+}
+
+/// App yang tidak aktif dijawab dengan pesan yang sama seperti client tak
+/// dikenal, supaya status app tidak bocor lewat perbedaan pesan.
+#[sqlx::test]
+async fn app_nonaktif_ditolak_400_dengan_pesan_sama(pool: PgPool) {
+    sync_permissions(&pool).await;
+    fixture_user(&pool, "nonaktif@example.com").await;
+    let fixture = fixture_app(&pool, "uji-spa", AppKind::Spa, CALLBACK).await;
+
+    sqlx::query("UPDATE apps SET is_active = false WHERE id = $1")
+        .bind(fixture.app.id)
+        .execute(&pool)
+        .await
+        .expect("gagal menonaktifkan app fixture");
+
+    let app = app(pool);
+    let access = access_token(&app, "nonaktif@example.com").await;
+
+    let response = get(
+        &app,
+        &authorize_uri(&fixture.client_id, CALLBACK, ""),
+        &access,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(location(&response).is_none());
+    let html = body_text(response).await;
+    assert!(
+        html.contains("client_id tidak dikenal"),
+        "app nonaktif harus dijawab seperti client tak dikenal"
+    );
 }
