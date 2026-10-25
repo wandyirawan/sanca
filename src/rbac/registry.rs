@@ -100,6 +100,11 @@ pub const ROUTES: &[RouteDef] = &[
     public(Method::POST, "/api/auth/refresh"),
     public(Method::POST, "/api/auth/logout"),
     public(Method::POST, "/api/oauth/token"),
+    // Halaman consent OAuth2 butuh sesi console (aud `core`) tetapi tidak menuntut
+    // permission: yang menentukan boleh atau tidak adalah keputusan pengguna di
+    // halaman itu sendiri, dan app tujuan diperiksa di domain.
+    authenticated(Method::GET, "/oauth/authorize"),
+    authenticated(Method::POST, "/oauth/authorize"),
     // Console: halaman login dan logout tidak butuh sesi. Logout tetap publik
     // karena satu-satunya bukti yang dipakai adalah cookie refresh; memaksa
     // access token yang sah di sini akan membuat pengguna dengan token

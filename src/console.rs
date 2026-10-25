@@ -21,8 +21,8 @@ use askama::Template;
 use axum::Extension;
 use axum::Form;
 use axum::Router;
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -91,6 +91,10 @@ pub struct LoginForm {
     /// ekstraktor sebelum handler sempat menolaknya dengan 403.
     #[serde(default)]
     pub _csrf: String,
+    /// Tujuan setelah login berhasil, mis. halaman consent OAuth. Hanya path
+    /// lokal yang diterima (lihat `safe_next`).
+    #[serde(default)]
+    pub next: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,7 +114,11 @@ pub async fn session_gate(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
-    if !path.starts_with("/console") {
+    // Halaman consent OAuth hidup di luar `/console`, tetapi memakai sesi yang
+    // sama. Gate ini yang membuat `GET /oauth/authorize` mengirim pengguna ke
+    // form login alih-alih menjawab 401 JSON di browser.
+    let is_authorize = path == "/oauth/authorize";
+    if !path.starts_with("/console") && !is_authorize {
         return next.run(request).await;
     }
 
@@ -133,7 +141,18 @@ pub async fn session_gate(
     };
 
     let Some(claims) = claims else {
-        return redirect_to_login(true, state.config.is_prod());
+        // Hanya GET yang membawa `next`: body POST tidak bisa diputar ulang
+        // lewat redirect, jadi permintaan consent yang belum login cukup
+        // dikembalikan ke form login.
+        let next_path = (is_authorize && request.method() == Method::GET)
+            .then(|| {
+                request
+                    .uri()
+                    .path_and_query()
+                    .map(|pq| pq.as_str().to_string())
+            })
+            .flatten();
+        return redirect_to_login(next_path.as_deref(), true, state.config.is_prod());
     };
 
     // Salinan token ke header Authorization: penegakan registry yang sudah ada
@@ -147,13 +166,29 @@ pub async fn session_gate(
     next.run(request).await
 }
 
+/// Query halaman login: hanya tujuan setelah berhasil masuk.
+#[derive(Debug, Default, Deserialize)]
+pub struct LoginQuery {
+    #[serde(default)]
+    pub next: Option<String>,
+}
+
 /// GET /console/login — form biasa (tanpa HTMX) dengan token CSRF.
-async fn login_page(State(state): State<AppState>, jar: CookieJar) -> Response {
+async fn login_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<LoginQuery>,
+) -> Response {
     let (token, _) = csrf::token(&jar);
     let page = LoginPage {
         csrf: token.clone(),
         email: String::new(),
         error: None,
+        next: query
+            .next
+            .as_deref()
+            .and_then(safe_next)
+            .unwrap_or_default(),
     };
 
     match render(page) {
@@ -185,6 +220,7 @@ async fn login_submit(
             &state,
             jar,
             &form.email,
+            &form.next,
             StatusCode::TOO_MANY_REQUESTS,
             "Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.",
         );
@@ -196,6 +232,7 @@ async fn login_submit(
             &state,
             jar,
             &form.email,
+            &form.next,
             StatusCode::UNAUTHORIZED,
             "Email atau password tidak cocok.",
         );
@@ -219,8 +256,12 @@ async fn login_submit(
         .max_age(time::Duration::seconds(issued.refresh_ttl))
         .build();
 
+    // Kembali ke tujuan semula kalau ada (mis. halaman consent OAuth), selain
+    // itu ke dashboard. `safe_next` memastikan tujuannya tetap path lokal.
+    let target = safe_next(&form.next).unwrap_or_else(|| "/console".to_string());
+
     // Cookie CSRF ikut dipertahankan supaya form berikutnya (logout) tetap sah.
-    (jar.add(access).add(refresh), Redirect::to("/console")).into_response()
+    (jar.add(access).add(refresh), Redirect::to(&target)).into_response()
 }
 
 /// POST /console/logout — cabut sesi lalu buang kedua cookie.
@@ -261,11 +302,11 @@ async fn dashboard(
 ) -> Response {
     let user_id = match Uuid::parse_str(&session.claims.sub) {
         Ok(id) => id,
-        Err(_) => return redirect_to_login(true, state.config.is_prod()),
+        Err(_) => return redirect_to_login(None, true, state.config.is_prod()),
     };
 
     let Ok(Some(user)) = db_users::detail(&state.pool, user_id).await else {
-        return redirect_to_login(true, state.config.is_prod());
+        return redirect_to_login(None, true, state.config.is_prod());
     };
 
     let counts = sqlx::query!(
@@ -428,6 +469,7 @@ fn login_error(
     state: &AppState,
     jar: CookieJar,
     email: &str,
+    next: &str,
     status: StatusCode,
     message: &str,
 ) -> Response {
@@ -436,6 +478,7 @@ fn login_error(
         csrf: token.clone(),
         email: email.to_string(),
         error: Some(message.to_string()),
+        next: safe_next(next).unwrap_or_default(),
     };
 
     match render(page) {
@@ -447,6 +490,19 @@ fn login_error(
             .into_response(),
         Err(err) => err.into_response(),
     }
+}
+
+/// Terima hanya path lokal sebagai tujuan redirect.
+///
+/// Path absolut (`//evil.test`) dan skema apa pun ditolak: tanpa ini, parameter
+/// `next` menjadi open redirect yang bisa dipakai memancing pengguna ke situs
+/// lain tepat setelah mereka memasukkan password.
+fn safe_next(raw: &str) -> Option<String> {
+    let path = raw.trim();
+    if !path.starts_with('/') || path.starts_with("//") || path.len() > 2048 {
+        return None;
+    }
+    Some(path.to_string())
 }
 
 /// 403 untuk token CSRF yang tidak cocok.
@@ -465,8 +521,19 @@ fn csrf_rejected(jar: CookieJar) -> Response {
 }
 
 /// 303 ke halaman login, sekaligus membuang cookie yang sudah tidak sah.
-fn redirect_to_login(clear_cookies: bool, secure: bool) -> Response {
-    let mut response = Redirect::to("/console/login").into_response();
+///
+/// `next` dibawa sebagai query supaya pengguna yang terlempar dari halaman
+/// consent OAuth kembali ke permintaan semula setelah berhasil masuk.
+fn redirect_to_login(next: Option<&str>, clear_cookies: bool, secure: bool) -> Response {
+    let target = match next.and_then(safe_next) {
+        Some(path) => format!(
+            "/console/login?next={}",
+            crate::domain::oauth::encode_component(&path)
+        ),
+        None => "/console/login".to_string(),
+    };
+
+    let mut response = Redirect::to(&target).into_response();
     if clear_cookies {
         clear_session_cookies(&mut response, secure);
     }

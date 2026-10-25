@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT code_hash, app_id, user_id, session_id, redirect_uri, scope,\n               code_challenge, challenge_method, expires_at, consumed_at\n        FROM oauth_codes\n        WHERE code_hash = $1\n          AND consumed_at IS NULL\n          AND expires_at > now()\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "code_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "app_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "app_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "redirect_uri",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "redirect_uri"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "scope",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "code_challenge",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "code_challenge"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "challenge_method",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "challenge_method"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "consumed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oauth_codes",
+            "name": "consumed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "e580ffcd9f248939e4adc9f2b706b5080d432302b116ca2be1be7167a1090e80"
+}

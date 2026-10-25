@@ -15,6 +15,8 @@ pub struct LoginPage {
     pub csrf: String,
     pub email: String,
     pub error: Option<String>,
+    /// Path lokal tujuan setelah login berhasil; kosong berarti dashboard.
+    pub next: String,
 }
 
 /// Halaman dashboard. `can()` dipanggil dari layout dan partial nav.
