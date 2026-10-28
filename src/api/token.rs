@@ -30,6 +30,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use serde_json::json;
 use time::OffsetDateTime;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::auth::jwt::{Claims, sign_access};
@@ -52,7 +53,7 @@ pub fn router() -> Router<AppState> {
 /// `refresh_token` hanya diisi oleh dua grant yang punya sesi; pada
 /// `client_credentials` field-nya tidak dikirim sama sekali supaya bentuk respons
 /// lama tidak berubah.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TokenResponse {
     pub access_token: String,
     pub token_type: &'static str,
@@ -62,8 +63,16 @@ pub struct TokenResponse {
     pub refresh_token: Option<String>,
 }
 
+/// Dokumentasi OpenAPI untuk endpoint token (handler asli membaca body mentah).
+#[allow(dead_code)]
+#[utoipa::path(
+    post,
+    path = "/api/oauth/token",
+    responses((status = 200, description = "OK", body = TokenResponse))
+)]
+pub(crate) async fn token_openapi() {}
+
 /// Titik masuk: pilih grant, lalu tempelkan `Cache-Control: no-store`.
-///
 /// Header dipasang di satu tempat supaya jalur error tidak bisa lupa. Respons
 /// token berisi kredensial berumur pendek; cache perantara tidak boleh menyimpannya.
 async fn token(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {

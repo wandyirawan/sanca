@@ -11,6 +11,7 @@ use axum::routing::{delete, get};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::auth::extractor::AuthUser;
@@ -37,7 +38,7 @@ pub fn router() -> Router<AppState> {
 }
 
 /// Ringkasan role untuk daftar di konsol.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RoleSummary {
     pub id: Uuid,
     pub key: String,
@@ -48,7 +49,7 @@ pub struct RoleSummary {
 }
 
 /// Body pembuatan role. `description` opsional.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateRoleRequest {
     pub key: String,
     pub name: String,
@@ -57,7 +58,7 @@ pub struct CreateRoleRequest {
 }
 
 /// Hasil pembuatan role.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct CreatedRole {
     pub id: Uuid,
     pub key: String,
@@ -67,7 +68,7 @@ pub struct CreatedRole {
 }
 
 /// Satu baris katalog permission app core.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PermissionEntry {
     pub key: String,
     pub name: String,
@@ -75,14 +76,21 @@ pub struct PermissionEntry {
 }
 
 /// Body penggantian isi permission role: set eksak, bukan tambahan.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct SetPermissionsRequest {
     #[serde(default)]
     pub permissions: Vec<String>,
 }
 
 /// Daftar role app `core` beserta jumlah permission-nya.
-async fn list_roles(State(state): State<AppState>) -> Result<Json<Vec<RoleSummary>>, AppError> {
+#[utoipa::path(
+    get,
+    path = "/api/roles",
+    responses((status = 200, description = "OK", body = [RoleSummary]))
+)]
+pub(crate) async fn list_roles(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<RoleSummary>>, AppError> {
     let roles = sqlx::query_as!(
         RoleSummary,
         r#"
@@ -103,7 +111,13 @@ async fn list_roles(State(state): State<AppState>) -> Result<Json<Vec<RoleSummar
 }
 
 /// Buat role baru di app `core`. Role buatan manusia selalu `is_system = false`.
-async fn create_role(
+#[utoipa::path(
+    post,
+    path = "/api/roles",
+    request_body = CreateRoleRequest,
+    responses((status = 201, description = "Created", body = CreatedRole))
+)]
+pub(crate) async fn create_role(
     State(state): State<AppState>,
     Json(body): Json<CreateRoleRequest>,
 ) -> Result<(StatusCode, Json<CreatedRole>), AppError> {
@@ -151,7 +165,12 @@ async fn create_role(
 }
 
 /// Katalog permission app `core`, terisi oleh sync registry saat boot.
-async fn list_permissions(
+#[utoipa::path(
+    get,
+    path = "/api/permissions",
+    responses((status = 200, description = "OK", body = [PermissionEntry]))
+)]
+pub(crate) async fn list_permissions(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<PermissionEntry>>, AppError> {
     let permissions = sqlx::query_as!(
@@ -171,7 +190,12 @@ async fn list_permissions(
 }
 
 /// Daftar key permission yang terpasang di satu role.
-async fn get_role_permissions(
+#[utoipa::path(
+    get,
+    path = "/api/roles/{id}/permissions",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub(crate) async fn get_role_permissions(
     State(state): State<AppState>,
     caller: AuthUser,
     Path(id): Path<Uuid>,
@@ -187,11 +211,13 @@ async fn get_role_permissions(
 }
 
 /// Ganti seluruh isi permission role (set eksak).
-///
-/// Urutan pemeriksaan penting: role sistem ditolak lebih dulu, baru kemudian
-/// scope pemberi. Dengan begitu superadmin pun tidak bisa mengubah role sistem,
-/// dan pesan penolakan untuk role sistem tidak tergantung isi scope.
-async fn set_role_permissions(
+#[utoipa::path(
+    put,
+    path = "/api/roles/{id}/permissions",
+    request_body = SetPermissionsRequest,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub(crate) async fn set_role_permissions(
     State(state): State<AppState>,
     caller: AuthUser,
     Path(id): Path<Uuid>,
@@ -236,7 +262,12 @@ async fn set_role_permissions(
 }
 
 /// Hapus role non-sistem. Role `is_system` selalu ditolak 403.
-async fn remove_role(
+#[utoipa::path(
+    delete,
+    path = "/api/roles/{id}",
+    responses((status = 204, description = "No Content"))
+)]
+pub(crate) async fn remove_role(
     State(state): State<AppState>,
     caller: AuthUser,
     Path(id): Path<Uuid>,

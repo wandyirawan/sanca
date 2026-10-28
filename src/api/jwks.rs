@@ -16,7 +16,13 @@ pub fn router() -> Router<AppState> {
     Router::new().route("/.well-known/jwks.json", get(jwks))
 }
 
-async fn jwks(State(state): State<AppState>) -> Response {
+/// Kunci publik aktif.
+#[utoipa::path(
+    get,
+    path = "/.well-known/jwks.json",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub(crate) async fn jwks(State(state): State<AppState>) -> Response {
     (
         [(CACHE_CONTROL, JWKS_CACHE_CONTROL)],
         Json(state.signing.jwks_json()),

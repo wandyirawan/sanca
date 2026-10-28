@@ -135,6 +135,12 @@ pub const ROUTES: &[RouteDef] = &[
     public(Method::POST, "/console/login"),
     public(Method::POST, "/console/logout"),
     public(Method::GET, "/assets/{*path}"),
+    // Dokumentasi OpenAPI (publik). Entri terpisah per template route yang
+    // dipasang Swagger UI supaya middleware tidak fail-closed (500).
+    public(Method::GET, "/openapi.json"),
+    public(Method::GET, "/docs"),
+    public(Method::GET, "/docs/"),
+    public(Method::GET, "/docs/{*rest}"),
     // Dashboard hanya butuh login; setiap menu di dalamnya diperiksa `can()`.
     authenticated(Method::GET, "/console"),
     // Layar pengguna: membaca daftar/detail cukup `user:read`, sedangkan form

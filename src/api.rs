@@ -4,6 +4,7 @@ pub mod health;
 pub mod jwks;
 pub mod me;
 pub mod oauth_authorize;
+pub mod openapi;
 pub mod rbac;
 pub mod token;
 pub mod users;
@@ -27,5 +28,6 @@ pub fn router() -> Router<AppState> {
         .merge(oauth_authorize::router())
         .merge(rbac::router())
         .merge(users::router())
+        .merge(openapi::router())
         .merge(console::router())
 }

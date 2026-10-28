@@ -9,6 +9,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::auth::extractor::AuthUser;
@@ -35,7 +36,7 @@ pub fn router() -> Router<AppState> {
 }
 
 /// Parameter daftar: pencarian bebas dan paging sederhana.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
 pub struct ListQuery {
     pub q: Option<String>,
     pub limit: Option<i64>,
@@ -44,7 +45,7 @@ pub struct ListQuery {
 
 /// Bentuk user yang dikirim ke klien. Tidak ada `password_hash` dan tidak ada
 /// `pepper_version`, jadi kebocoran kolom sensitif tidak mungkin lewat sini.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct UserResponse {
     pub id: Uuid,
     pub email: String,
@@ -75,7 +76,7 @@ impl From<UserDetail> for UserResponse {
 }
 
 /// Body pembuatan user.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateUserRequest {
     pub email: String,
     pub password: String,
@@ -89,7 +90,7 @@ pub struct CreateUserRequest {
 ///
 /// `status` sengaja berupa string, bukan enum, supaya nilai asing dijawab 400
 /// dengan pesan kita sendiri, bukan 422 bawaan hasil deserialisasi.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateUserRequest {
     pub display_name: Option<String>,
     pub status: Option<String>,
@@ -97,7 +98,13 @@ pub struct UpdateUserRequest {
 }
 
 /// Daftar user, terurut email.
-async fn list_users(
+#[utoipa::path(
+    get,
+    path = "/api/users",
+    params(ListQuery),
+    responses((status = 200, description = "OK", body = [UserResponse]))
+)]
+pub(crate) async fn list_users(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<UserResponse>>, AppError> {
@@ -110,7 +117,12 @@ async fn list_users(
 }
 
 /// Detail satu user.
-async fn get_user(
+#[utoipa::path(
+    get,
+    path = "/api/users/{id}",
+    responses((status = 200, description = "OK", body = UserResponse))
+)]
+pub(crate) async fn get_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UserResponse>, AppError> {
@@ -122,7 +134,13 @@ async fn get_user(
 }
 
 /// Buat user baru. Password minimal 12 karakter dijaga lapisan domain.
-async fn create_user(
+#[utoipa::path(
+    post,
+    path = "/api/users",
+    request_body = CreateUserRequest,
+    responses((status = 201, description = "Created", body = UserResponse))
+)]
+pub(crate) async fn create_user(
     State(state): State<AppState>,
     caller: AuthUser,
     Json(body): Json<CreateUserRequest>,
@@ -149,7 +167,7 @@ async fn create_user(
 }
 
 /// Body pemberian role ke user.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct AssignRoleRequest {
     pub role_id: Uuid,
 }
@@ -159,7 +177,13 @@ pub struct AssignRoleRequest {
 /// `caller` wajib ikut karena target yang punya role `superadmin` hanya boleh
 /// diubah oleh superadmin lain; tanpa identitas pemanggil, pemegang `user:write`
 /// bisa mengambil alih akun yang lebih tinggi.
-async fn patch_user(
+#[utoipa::path(
+    patch,
+    path = "/api/users/{id}",
+    request_body = UpdateUserRequest,
+    responses((status = 200, description = "OK", body = UserResponse))
+)]
+pub(crate) async fn patch_user(
     State(state): State<AppState>,
     caller: AuthUser,
     Path(id): Path<Uuid>,
@@ -202,7 +226,13 @@ async fn patch_user(
 }
 
 /// Beri satu role ke user. 204 kalau berhasil, juga kalau user sudah punya role itu.
-async fn assign_role(
+#[utoipa::path(
+    post,
+    path = "/api/users/{id}/roles",
+    request_body = AssignRoleRequest,
+    responses((status = 204, description = "No Content"))
+)]
+pub(crate) async fn assign_role(
     State(state): State<AppState>,
     caller: AuthUser,
     Path(id): Path<Uuid>,
@@ -224,9 +254,13 @@ async fn assign_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Cabut satu role dari user. 204 walau user memang tidak punya role itu,
-/// karena hasil akhirnya sama: role tidak lagi menempel.
-async fn unassign_role(
+/// Cabut satu role dari user.
+#[utoipa::path(
+    delete,
+    path = "/api/users/{id}/roles/{role_id}",
+    responses((status = 204, description = "No Content"))
+)]
+pub(crate) async fn unassign_role(
     State(state): State<AppState>,
     caller: AuthUser,
     Path((id, role_id)): Path<(Uuid, Uuid)>,

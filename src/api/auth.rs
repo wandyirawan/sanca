@@ -12,6 +12,7 @@ use rand::TryRngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::auth::jwt::{Claims, sign_access};
@@ -38,20 +39,20 @@ pub fn router() -> Router<AppState> {
         .route("/api/auth/logout", post(logout))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
     pub app_slug: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RefreshRequest {
     pub refresh_token: String,
 }
 
 /// Bentuk respons login/refresh. `expires_in` dalam detik, mengikuti access TTL app.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TokenResponse {
     pub access_token: String,
     pub refresh_token: String,
@@ -60,7 +61,13 @@ pub struct TokenResponse {
 }
 
 /// Tukar email + password dengan sepasang token.
-async fn login(
+#[utoipa::path(
+    post,
+    path = "/api/auth/login",
+    request_body = LoginRequest,
+    responses((status = 200, description = "OK", body = TokenResponse))
+)]
+pub(crate) async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
     peer: PeerAddr,
@@ -138,7 +145,13 @@ async fn check_credentials(
 }
 
 /// Rotasi: sesi lama dicabut, sesi baru dibuat, token baru diterbitkan.
-async fn refresh(
+#[utoipa::path(
+    post,
+    path = "/api/auth/refresh",
+    request_body = RefreshRequest,
+    responses((status = 200, description = "OK", body = TokenResponse))
+)]
+pub(crate) async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<RefreshRequest>,
@@ -190,7 +203,13 @@ async fn refresh(
 
 /// Cabut sesi milik refresh token. Selalu 204, termasuk kalau tokennya sudah
 /// tidak dikenal, supaya endpoint ini tidak bisa dipakai menebak token valid.
-async fn logout(
+#[utoipa::path(
+    post,
+    path = "/api/auth/logout",
+    request_body = RefreshRequest,
+    responses((status = 204, description = "No Content"))
+)]
+pub(crate) async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<RefreshRequest>,

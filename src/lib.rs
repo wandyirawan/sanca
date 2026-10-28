@@ -7,6 +7,7 @@ pub mod db;
 pub mod domain;
 pub mod error;
 pub mod middleware;
+pub mod openapi;
 pub mod rbac;
 pub mod startup;
 pub mod state;
