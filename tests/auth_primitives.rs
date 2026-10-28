@@ -238,6 +238,11 @@ async fn cli_user_create_menyimpan_superadmin() {
         .await
         .expect("koneksi database test");
 
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrasi test");
+
     let mut child = Command::new(env!("CARGO_BIN_EXE_sanca"))
         .args([
             "user",
@@ -317,6 +322,11 @@ async fn cli_user_create_superadmin_mendapat_role_superadmin_app_core() {
         .await
         .expect("koneksi database test");
 
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrasi test");
+
     let output = jalankan_user_create(&database_url, &email, true);
     assert!(
         output.status.success(),
@@ -358,6 +368,11 @@ async fn cli_user_create_tanpa_superadmin_tidak_punya_role() {
     let pool = sqlx::PgPool::connect(&database_url)
         .await
         .expect("koneksi database test");
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrasi test");
 
     let output = jalankan_user_create(&database_url, &email, false);
     assert!(
