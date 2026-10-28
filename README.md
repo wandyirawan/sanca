@@ -48,19 +48,22 @@ Mold dipakai sebagai linker (lihat `~/.cargo/config.toml`), bukan bagian repo.
 ## Jalan lokal
 
 ```bash
-# 1. database + observability (postgres 5433, loki 3100, alloy 12345, grafana 3000)
-docker compose up -d db
-docker compose --profile obs up -d
+# 1. database
+make db
 
 # 2. migrasi
-export DATABASE_URL=postgres://sanca:sanca@localhost:5433/sanca_dev
-sqlx migrate run
+make migrate
 
 # 3. server di 127.0.0.1:8080 dengan auto-reload
 make dev
 
 # 4. cek
 curl -s localhost:8080/healthz      # {"status":"ok"}
+
+# 5. login (console)
+curl -s -c /tmp/sanca.cookies -X POST localhost:8080/api/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@contoh.id","password":"...","app_slug":"core"}'
 ```
 
 Kalau `make dev` bilang `cargo-watch` tidak ada:
