@@ -9,6 +9,20 @@ jobs:
   ci:
     name: fmt, clippy, test, deny, docker
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: sanca
+          POSTGRES_PASSWORD: sanca
+          POSTGRES_DB: sanca_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sanca -d sanca_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       SQLX_OFFLINE: "true"
 
@@ -29,6 +43,9 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: SQLX_OFFLINE=true cargo test --all-features
+        env:
+          DATABASE_URL: postgres://sanca:sanca@localhost:5432/sanca_ci
+          SANCA_ENV: dev
         run: cargo test --all-features
 
       - name: Install cargo-deny
