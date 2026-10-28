@@ -4,19 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Masuk · Sanca</title>
-  <script>
-    // Tema login wajib sama dengan console: satu pilihan, satu skrip.
-    (function () {
-      var pilihan = null;
-      try { pilihan = localStorage.getItem('sanca-tema'); } catch (e) { /* mode privat */ }
-      if (pilihan !== 'tanah-malam' && pilihan !== 'tanah-siang') {
-        pilihan = window.matchMedia('(prefers-color-scheme: light)').matches
-          ? 'tanah-siang'
-          : 'tanah-malam';
-      }
-      document.documentElement.setAttribute('data-theme', pilihan);
-    })();
-  </script>
+  <script src="/assets/app.js"></script>
   <link rel="stylesheet" href="/assets/vendor/daisyui.css">
   <link rel="stylesheet" href="/assets/app.css">
 </head>

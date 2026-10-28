@@ -4,19 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Sanca{% endblock %}</title>
-  <script>
-    // Set tema sebelum CSS dilukis supaya tidak ada kedipan tema salah.
-    (function () {
-      var pilihan = null;
-      try { pilihan = localStorage.getItem('sanca-tema'); } catch (e) { /* mode privat */ }
-      if (pilihan !== 'tanah-malam' && pilihan !== 'tanah-siang') {
-        pilihan = window.matchMedia('(prefers-color-scheme: light)').matches
-          ? 'tanah-siang'
-          : 'tanah-malam';
-      }
-      document.documentElement.setAttribute('data-theme', pilihan);
-    })();
-  </script>
+  <script src="/assets/app.js"></script>
   <link rel="stylesheet" href="/assets/vendor/daisyui.css">
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/vendor/htmx.min.js" defer></script>
@@ -64,24 +52,5 @@
   </div>
 
   {% include "partials/toast.html" %}
-
-  <script>
-    // Pilihan tema disimpan di localStorage; tanpa pilihan, jatuh ke preferensi OS
-    // yang sudah dibaca skrip di <head>.
-    (function () {
-      var tombol = document.getElementById('theme-toggle');
-      if (!tombol) { return; }
-      var gelap = document.documentElement.getAttribute('data-theme') === 'tanah-malam';
-      tombol.setAttribute('aria-pressed', gelap ? 'true' : 'false');
-
-      tombol.addEventListener('click', function () {
-        var sekarang = document.documentElement.getAttribute('data-theme');
-        var berikut = sekarang === 'tanah-malam' ? 'tanah-siang' : 'tanah-malam';
-        document.documentElement.setAttribute('data-theme', berikut);
-        tombol.setAttribute('aria-pressed', berikut === 'tanah-malam' ? 'true' : 'false');
-        try { localStorage.setItem('sanca-tema', berikut); } catch (e) { /* abaikan */ }
-      });
-    })();
-  </script>
 </body>
 </html>

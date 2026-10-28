@@ -55,6 +55,9 @@ pub fn build_app(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::new(request_id.clone()))
         .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))
+        .layer(axum::middleware::from_fn(
+            crate::middleware::security::security_headers,
+        ))
         .with_state(state)
 }
 

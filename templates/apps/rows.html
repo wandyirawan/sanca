@@ -44,10 +44,9 @@
     <td class="text-right font-mono tabular text-xs">{{ row.live_credentials }}</td>
     <td class="text-right">
       {% if data.can_write %}
-      <form method="post" action="/console/apps/{{ row.id }}/rotate" class="flex justify-end">
+      <form method="post" action="/console/apps/{{ row.id }}/rotate" class="flex justify-end" data-confirm="Rotasi mencabut semua kredensial hidup aplikasi ini. Secret lama langsung berhenti berlaku. Lanjutkan?">
         <input type="hidden" name="_csrf" value="{{ data.csrf }}">
-        <button type="submit" class="btn btn-ghost btn-sm"
-                onclick="return confirm('Rotasi mencabut semua kredensial hidup aplikasi ini. Secret lama langsung berhenti berlaku. Lanjutkan?')">
+        <button type="submit" class="btn btn-ghost btn-sm">
           Rotasi secret
         </button>
       </form>
